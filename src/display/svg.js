@@ -577,10 +577,10 @@ class SVGGraphics {
           this.setFont(args);
           break;
         case OPS.showText:
-          this.showText(args[0]);
+          // this.showText(args[0]);
           break;
         case OPS.showSpacedText:
-          this.showText(args[0]);
+          // this.showText(args[0]);
           break;
         case OPS.endText:
           this.endText();

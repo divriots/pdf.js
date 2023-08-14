@@ -4466,6 +4466,7 @@ class TranslatedFont {
   }
 
   loadType3Data(evaluator, resources, task) {
+    debugger;
     if (this.type3Loaded) {
       return this.type3Loaded;
     }

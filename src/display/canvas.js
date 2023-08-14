@@ -2093,6 +2093,7 @@ class CanvasGraphics {
   }
 
   showText(glyphs) {
+    return;
     const current = this.current;
     const font = current.font;
     if (font.isType3Font) {

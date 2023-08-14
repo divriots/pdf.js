@@ -30,7 +30,7 @@
   text-align: initial;
   inset: 0;
   overflow: hidden;
-  opacity: 0.25;
+  /* opacity: 0.25; */
   line-height: 1;
   text-size-adjust: none;
   forced-color-adjust: none;
@@ -39,7 +39,7 @@
 }
 
 .textLayer :is(span, br) {
-  color: transparent;
+  /* color: transparent; */
   position: absolute;
   white-space: pre;
   cursor: text;

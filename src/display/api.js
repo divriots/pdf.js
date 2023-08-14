@@ -1549,6 +1549,7 @@ class PDFPageProxy {
           transparency,
           optionalContentConfig,
         });
+        debugger
         internalRenderTask.operatorListChanged();
       })
       .catch(complete);
@@ -1827,6 +1828,7 @@ class PDFPageProxy {
     }
     const { map, transfers } = annotationStorageSerializable;
 
+    debugger
     const readableStream = this._transport.messageHandler.sendWithStream(
       "GetOperatorList",
       {
@@ -1852,6 +1854,7 @@ class PDFPageProxy {
           if (this._transport.destroyed) {
             return; // Ignore any pending requests if the worker was terminated.
           }
+          debugger
           this._renderPageChunk(value, intentState);
           pump();
         },
@@ -3394,6 +3397,7 @@ class InternalRenderTask {
       this.graphicsReadyCallback ||= this._continueBound;
       return;
     }
+    // could be interesting to filter?
     this.stepper?.updateOperatorList(this.operatorList);
 
     if (this.running) {
