@@ -301,6 +301,17 @@ const PDFViewerApplication = {
       console.error(`_initializeOptions: "${reason.message}".`);
     }
 
+    const queryString = document.location.search.substring(1);
+    const params = parseQueryString(queryString);
+    const opts = AppOptions.getAll();
+    for (const key of params.keys()) {
+      const [opt, prev] = Object.entries(opts).find(([k]) => k.toLowerCase() === key);
+      if (opt) {
+        const raw = params.get(key);
+        AppOptions.set(opt, typeof(prev) === 'boolean' ? raw !== 'false' : typeof(prev) === 'number' ? parseInt(raw) : raw);
+      }
+    }
+
     if (AppOptions.get("pdfBugEnabled")) {
       await this._parseHashParams();
     }
@@ -526,6 +537,7 @@ const PDFViewerApplication = {
       maxCanvasPixels: AppOptions.get("maxCanvasPixels"),
       enablePermissions: AppOptions.get("enablePermissions"),
       pageColors,
+      renderGlyphs: AppOptions.get("renderGlyphs")
     });
     this.pdfViewer = pdfViewer;
 

@@ -304,13 +304,17 @@ const defaultOptions = {
         : "../build/pdf.worker.js",
     kind: OptionKind.WORKER,
   },
+  renderGlyphs: {
+    value: true,
+    kind: OptionKind.API + OptionKind.VIEWER
+  },
 };
 if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
-  defaultOptions.defaultUrl = {
-    /** @type {string} */
-    value: "compressed.tracemonkey-pldi-09.pdf",
-    kind: OptionKind.VIEWER,
-  };
+  // defaultOptions.defaultUrl = {
+  //   /** @type {string} */
+  //   value: "compressed.tracemonkey-pldi-09.pdf",
+  //   kind: OptionKind.VIEWER,
+  // };
   defaultOptions.disablePreferences = {
     /** @type {boolean} */
     value: typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING"),

@@ -548,26 +548,27 @@ function getVisibleElements({
     const viewRight = currentWidth + viewWidth;
     const viewBottom = currentHeight + viewHeight;
 
-    if (lastEdge === -1) {
-      // As commented above, this is only needed in non-horizontal cases.
-      // Setting lastEdge to the bottom of the first page that is partially
-      // visible ensures that the next page fully below lastEdge is on the
-      // next row, which has to be fully hidden along with all subsequent rows.
-      if (viewBottom >= bottom) {
-        lastEdge = viewBottom;
-      }
-    } else if ((horizontal ? currentWidth : currentHeight) > lastEdge) {
-      break;
-    }
+    // hack: make it so every pages are visible
+    // if (lastEdge === -1) {
+    //   // As commented above, this is only needed in non-horizontal cases.
+    //   // Setting lastEdge to the bottom of the first page that is partially
+    //   // visible ensures that the next page fully below lastEdge is on the
+    //   // next row, which has to be fully hidden along with all subsequent rows.
+    //   if (viewBottom >= bottom) {
+    //     lastEdge = viewBottom;
+    //   }
+    // } else if ((horizontal ? currentWidth : currentHeight) > lastEdge) {
+    //   break;
+    // }
 
-    if (
-      viewBottom <= top ||
-      currentHeight >= bottom ||
-      viewRight <= left ||
-      currentWidth >= right
-    ) {
-      continue;
-    }
+    // if (
+    //   viewBottom <= top ||
+    //   currentHeight >= bottom ||
+    //   viewRight <= left ||
+    //   currentWidth >= right
+    // ) {
+    //   continue;
+    // }
 
     const hiddenHeight =
       Math.max(0, top - currentHeight) + Math.max(0, viewBottom - bottom);

@@ -270,6 +270,7 @@ class PDFViewer {
       options.annotationEditorMode ?? AnnotationEditorType.NONE;
     this.imageResourcesPath = options.imageResourcesPath || "";
     this.enablePrintAutoRotate = options.enablePrintAutoRotate || false;
+    this.renderGlyphs = options.renderGlyphs;
     if (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) {
       this.removePageBorders = options.removePageBorders || false;
 
@@ -904,6 +905,7 @@ class PDFViewer {
             pageColors: this.pageColors,
             l10n: this.l10n,
             layerProperties,
+            renderGlyphs: this.renderGlyphs
           });
           this._pages.push(pageView);
         }

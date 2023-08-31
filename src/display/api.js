@@ -1436,6 +1436,7 @@ class PDFPageProxy {
     annotationCanvasMap = null,
     pageColors = null,
     printAnnotationStorage = null,
+    renderGlyphs = true
   }) {
     this._stats?.time("Overall");
 
@@ -1518,6 +1519,7 @@ class PDFPageProxy {
         viewport,
         transform,
         background,
+        renderGlyphs
       },
       objs: this.objs,
       commonObjs: this.commonObjs,
@@ -3351,7 +3353,7 @@ class InternalRenderTask {
       this.stepper.init(this.operatorList);
       this.stepper.nextBreakPoint = this.stepper.getNextBreakPoint();
     }
-    const { canvasContext, viewport, transform, background } = this.params;
+    const { canvasContext, viewport, transform, background, renderGlyphs } = this.params;
 
     this.gfx = new CanvasGraphics(
       canvasContext,
@@ -3359,7 +3361,7 @@ class InternalRenderTask {
       this.objs,
       this.canvasFactory,
       this.filterFactory,
-      { optionalContentConfig },
+      { optionalContentConfig, renderGlyphs },
       this.annotationCanvasMap,
       this.pageColors
     );

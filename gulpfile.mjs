@@ -38,7 +38,7 @@ import through from "through2";
 import Vinyl from "vinyl";
 import webpack2 from "webpack";
 import webpackStream from "webpack-stream";
-import zip from "gulp-zip";
+import { deleteAsync } from 'del';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -893,9 +893,12 @@ gulp.task("locale", function () {
       gulp.dest(VIEWER_LOCALE_OUTPUT)
     ),
     gulp
-      .src(L10N_DIR + "/{" + locales.join(",") + "}/viewer.properties", {
+      .src(L10N_DIR + "/" + locales[0] + "/viewer.properties", {
         base: L10N_DIR,
       })
+      // .src(L10N_DIR + "/{" + locales.join(",") + "}/viewer.properties", {
+      //   base: L10N_DIR,
+      // })
       .pipe(gulp.dest(VIEWER_LOCALE_OUTPUT)),
   ]);
 });
@@ -984,9 +987,9 @@ function buildGeneric(defines, dir) {
       )
       .pipe(gulp.dest(dir + "web")),
 
-    gulp
-      .src("web/compressed.tracemonkey-pldi-09.pdf")
-      .pipe(gulp.dest(dir + "web")),
+    // gulp
+    //   .src("web/compressed.tracemonkey-pldi-09.pdf")
+    //   .pipe(gulp.dest(dir + "web")),
   ]);
 }
 
@@ -1721,37 +1724,25 @@ gulp.task(
   )
 );
 
-function compressPublish(targetName, dir) {
-  return gulp
-    .src(dir + "**")
-    .pipe(zip(targetName))
-    .pipe(gulp.dest(BUILD_DIR))
-    .on("end", function () {
-      console.log("Built distribution file: " + targetName);
-    });
-}
-
 gulp.task(
   "publish",
-  gulp.series("generic", "generic-legacy", function createPublish(done) {
-    const version = JSON.parse(
-      fs.readFileSync(BUILD_DIR + "version.json").toString()
-    ).version;
+  gulp.series("generic", async function createPublish(done) {
+      const version = JSON.parse(
+        fs.readFileSync(BUILD_DIR + "version.json").toString()
+      ).version;
 
-    config.stableVersion = version;
+      config.stableVersion = version;
 
-    return merge([
-      createStringSource(CONFIG_FILE, JSON.stringify(config, null, 2)).pipe(
-        gulp.dest(".")
-      ),
-      compressPublish("pdfjs-" + version + "-dist.zip", GENERIC_DIR),
-      compressPublish(
-        "pdfjs-" + version + "-legacy-dist.zip",
-        GENERIC_LEGACY_DIR
-      ),
-    ]);
-  })
-);
+      const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json')));
+      delete manifest.dependencies;
+      delete manifest.devDependencies;
+      delete manifest.scripts;
+      manifest.main = "build/pdf.js";
+      fs.writeFileSync(path.join(BUILD_DIR, 'generic', 'package.json'), JSON.stringify(manifest, undefined, 4));
+      await deleteAsync(path.resolve(BUILD_DIR, 'generic/**/*.js.map'));
+      done();
+    },
+));
 
 function setTestEnv(done) {
   process.env.TESTING = "true";

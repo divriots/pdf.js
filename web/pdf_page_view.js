@@ -159,6 +159,7 @@ class PDFPageView {
       options.isOffscreenCanvasSupported ?? true;
     this.maxCanvasPixels = options.maxCanvasPixels ?? MAX_CANVAS_PIXELS;
     this.pageColors = options.pageColors || null;
+    this.renderGlyphs = options.renderGlyphs;
 
     this.eventBus = options.eventBus;
     this.renderingQueue = options.renderingQueue;
@@ -973,6 +974,7 @@ class PDFPageView {
       optionalContentConfigPromise: this._optionalContentConfigPromise,
       annotationCanvasMap: this._annotationCanvasMap,
       pageColors,
+      renderGlyphs: this.renderGlyphs
     };
     const renderTask = (this.renderTask = this.pdfPage.render(renderContext));
     renderTask.onContinue = renderContinueCallback;

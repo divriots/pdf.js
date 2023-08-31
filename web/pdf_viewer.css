@@ -76,7 +76,7 @@
   margin: var(--page-margin);
   position: relative;
   overflow: visible;
-  border: var(--page-border);
+  border: none;
   background-clip: content-box;
   background-color: rgba(255, 255, 255, 1);
 }
@@ -199,5 +199,5 @@
 
 .pdfPresentationMode .pdfViewer .page {
   margin: 0 auto;
-  border: 2px solid transparent;
+  border: none;
 }

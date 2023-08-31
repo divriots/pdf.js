@@ -1,5 +1,6 @@
 {
-  "name": "pdf.js",
+  "name": "@divriots/pdf.js",
+  "version": "0.0.4",
   "devDependencies": {
     "@babel/core": "^7.22.10",
     "@babel/plugin-transform-modules-commonjs": "^7.22.5",
@@ -13,6 +14,7 @@
     "canvas": "^2.11.2",
     "core-js": "^3.32.1",
     "cross-env": "^7.0.3",
+    "del": "^7.1.0",
     "es-module-shims": "1.4.7",
     "eslint": "^8.47.0",
     "eslint-config-prettier": "^8.10.0",
@@ -69,5 +71,8 @@
   "engines": {
     "node": ">=18"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  }
 }

@@ -945,7 +945,7 @@ class CanvasGraphics {
     objs,
     canvasFactory,
     filterFactory,
-    { optionalContentConfig, markedContentStack = null },
+    { optionalContentConfig, markedContentStack = null, renderGlyphs = true },
     annotationCanvasMap,
     pageColors
   ) {
@@ -954,6 +954,7 @@ class CanvasGraphics {
       this.ctx.canvas.width,
       this.ctx.canvas.height
     );
+    this.renderGlyphs = renderGlyphs;
     this.stateStack = [];
     this.pendingClip = null;
     this.pendingEOFill = false;
@@ -2093,6 +2094,7 @@ class CanvasGraphics {
   }
 
   showText(glyphs) {
+    if (!this.renderGlyphs) return;
     const current = this.current;
     const font = current.font;
     if (font.isType3Font) {
