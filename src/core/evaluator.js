@@ -2516,6 +2516,7 @@ class PartialEvaluator {
         transform: textChunk.transform,
         fontName: textChunk.fontName,
         hasEOL: textChunk.hasEOL,
+        color: textChunk.color,
       };
     }
 
@@ -2822,6 +2823,14 @@ class PartialEvaluator {
         }
 
         if (
+          textContentItem.initialized &&
+          textContentItem.str.length &&
+          textContentItem.color !== textState.color
+        ) {
+          flushTextContentItem();
+        }
+
+        if (
           !category.isZeroWidthDiacritic &&
           !compareWithLastPosition(scaledDim)
         ) {
@@ -2837,6 +2846,7 @@ class PartialEvaluator {
         // Must be called after compareWithLastPosition because
         // the textContentItem could have been flushed.
         const textChunk = ensureTextContentItem();
+        textChunk.color = textState.color;
         if (category.isZeroWidthDiacritic) {
           scaledDim = 0;
         }
@@ -3056,6 +3066,14 @@ class PartialEvaluator {
             break;
           case OPS.setCharSpacing:
             textState.charSpacing = args[0];
+            break;
+          case OPS.setFillRGBColor:
+            const color = Util.makeHexColor(
+              Math.round(args[0] * 255),
+              Math.round(args[1] * 255),
+              Math.round(args[2] * 255)
+            );
+            textState.color = color;
             break;
           case OPS.setWordSpacing:
             textState.wordSpacing = args[0];
@@ -4666,6 +4684,7 @@ class TextState {
     this.leading = 0;
     this.textHScale = 1;
     this.textRise = 0;
+    this.color = null;
   }
 
   setTextMatrix(a, b, c, d, e, f) {
