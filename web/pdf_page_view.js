@@ -928,6 +928,15 @@ class PDFPageView {
 
     const ctx = canvas.getContext("2d", { alpha: false });
     const outputScale = (this.outputScale = new OutputScale());
+    outputScale.sx *= 8;
+    outputScale.sy *= 8;
+
+    if (width * outputScale.sx > 4096) {
+      outputScale.sy = outputScale.sx = 4096 / width;
+    }
+    if (height * outputScale.sy > 4096) {
+      outputScale.sy = outputScale.sx = 4096 / height;
+    }
 
     if (
       (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
@@ -950,8 +959,8 @@ class PDFPageView {
         this.#hasRestrictedScaling = false;
       }
     }
-    const sfx = approximateFraction(outputScale.sx);
-    const sfy = approximateFraction(outputScale.sy);
+    const sfx = [1, 1]; // approximateFraction(outputScale.sx);
+    const sfy = [1, 1]; // approximateFraction(outputScale.sy);
 
     canvas.width = roundToDivide(width * outputScale.sx, sfx[0]);
     canvas.height = roundToDivide(height * outputScale.sy, sfy[0]);
@@ -974,7 +983,7 @@ class PDFPageView {
       optionalContentConfigPromise: this._optionalContentConfigPromise,
       annotationCanvasMap: this._annotationCanvasMap,
       pageColors,
-      renderGlyphs: this.renderGlyphs
+      renderGlyphs: this.renderGlyphs,
     };
     const renderTask = (this.renderTask = this.pdfPage.render(renderContext));
     renderTask.onContinue = renderContinueCallback;

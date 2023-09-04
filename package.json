@@ -1,6 +1,6 @@
 {
   "name": "@divriots/pdf.js",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "devDependencies": {
     "@babel/core": "^7.22.10",
     "@babel/plugin-transform-modules-commonjs": "^7.22.5",

@@ -199,6 +199,9 @@ function appendText(task, geom, styles) {
   }
   divStyle.fontSize = `${scaleFactorStr}${fontHeight.toFixed(2)}px)`;
   divStyle.fontFamily = style.fontFamily;
+  if (geom.color) {
+    divStyle.color = geom.color;
+  }
 
   textDivProperties.fontSize = fontHeight;
 

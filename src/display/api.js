@@ -1519,7 +1519,7 @@ class PDFPageProxy {
         viewport,
         transform,
         background,
-        renderGlyphs
+        renderGlyphs,
       },
       objs: this.objs,
       commonObjs: this.commonObjs,
