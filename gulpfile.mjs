@@ -420,7 +420,7 @@ function addGlobalExports(amdName, jsName) {
 }
 
 function createMainBundle(defines) {
-  const mainAMDName = "pdfjs-dist/build/pdf";
+  const mainAMDName = "@divriots/pdfjs-dist/build/pdf";
   const mainOutputName = "pdf.js";
 
   const mainFileConfig = createWebpackConfig(defines, {
@@ -438,7 +438,7 @@ function createMainBundle(defines) {
 }
 
 function createScriptingBundle(defines, extraOptions = undefined) {
-  const scriptingAMDName = "pdfjs-dist/build/pdf.scripting";
+  const scriptingAMDName = "@divriots/pdfjs-dist/build/pdf.scripting";
   const scriptingOutputName = "pdf.scripting.js";
 
   const scriptingFileConfig = createWebpackConfig(
@@ -486,7 +486,7 @@ function createTemporaryScriptingBundle(defines, extraOptions = undefined) {
 }
 
 function createSandboxBundle(defines, extraOptions = undefined) {
-  const sandboxAMDName = "pdfjs-dist/build/pdf.sandbox";
+  const sandboxAMDName = "@divriots/pdfjs-dist/build/pdf.sandbox";
   const sandboxOutputName = "pdf.sandbox.js";
 
   const scriptingPath = TMP_DIR + "pdf.scripting.js";
@@ -516,7 +516,7 @@ function createSandboxBundle(defines, extraOptions = undefined) {
 }
 
 function createWorkerBundle(defines) {
-  const workerAMDName = "pdfjs-dist/build/pdf.worker";
+  const workerAMDName = "@divriots/pdfjs-dist/build/pdf.worker";
   const workerOutputName = "pdf.worker.js";
 
   const workerFileConfig = createWebpackConfig(defines, {
@@ -571,7 +571,7 @@ function createGVWebBundle(defines, options) {
 }
 
 function createComponentsBundle(defines) {
-  const componentsAMDName = "pdfjs-dist/web/pdf_viewer";
+  const componentsAMDName = "@divriots/pdfjs-dist/web/pdf_viewer";
   const componentsOutputName = "pdf_viewer.js";
 
   const componentsFileConfig = createWebpackConfig(defines, {
@@ -589,7 +589,8 @@ function createComponentsBundle(defines) {
 }
 
 function createImageDecodersBundle(defines) {
-  const imageDecodersAMDName = "pdfjs-dist/image_decoders/pdf.image_decoders";
+  const imageDecodersAMDName =
+    "@divriots/pdfjs-dist/image_decoders/pdf.image_decoders";
   const imageDecodersOutputName = "pdf.image_decoders.js";
 
   const componentsFileConfig = createWebpackConfig(defines, {
@@ -2169,7 +2170,7 @@ gulp.task(
 function packageJson() {
   const VERSION = getVersionJSON().version;
 
-  const DIST_NAME = "pdfjs-dist";
+  const DIST_NAME = "@divriots/pdfjs-dist";
   const DIST_DESCRIPTION = "Generic build of Mozilla's PDF.js library.";
   const DIST_KEYWORDS = ["Mozilla", "pdf", "pdf.js"];
   const DIST_HOMEPAGE = "http://mozilla.github.io/pdf.js/";

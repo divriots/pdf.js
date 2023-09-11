@@ -1243,6 +1243,33 @@ class PDFDocumentProxy {
  */
 
 /**
+ * Page render task parameters.
+ *
+ * @typedef {Object} RenderTaskParameters
+ * @property {InternalRenderTask} task
+ * @property {string} [intent] - Rendering intent, can be 'display', 'print',
+ *   or 'any'. The default value is 'display'.
+ * @property {number} [annotationMode] Controls which annotations are rendered
+ *   onto the canvas, for annotations with appearance-data; the values from
+ *   {@link AnnotationMode} should be used. The following values are supported:
+ *    - `AnnotationMode.DISABLE`, which disables all annotations.
+ *    - `AnnotationMode.ENABLE`, which includes all possible annotations (thus
+ *      it also depends on the `intent`-option, see above).
+ *    - `AnnotationMode.ENABLE_FORMS`, which excludes annotations that contain
+ *      interactive form elements (those will be rendered in the display layer).
+ *    - `AnnotationMode.ENABLE_STORAGE`, which includes all possible annotations
+ *      (as above) but where interactive form elements are updated with data
+ *      from the {@link AnnotationStorage}-instance; useful e.g. for printing.
+ *   The default value is `AnnotationMode.ENABLE`.
+ * @property {Promise<OptionalContentConfig>} [optionalContentConfigPromise] -
+ *   A promise that should resolve with an {@link OptionalContentConfig}
+ *   created from `PDFDocumentProxy.getOptionalContentConfig`. If `null`,
+ *   the configuration will be fetched automatically with the default visibility
+ *   states set.
+ * @property {PrintAnnotationStorage} [printAnnotationStorage]
+ */
+
+/**
  * Page getOperatorList parameters.
  *
  * @typedef {Object} GetOperatorListParameters
@@ -1554,6 +1581,121 @@ class PDFPageProxy {
       .catch(complete);
 
     return renderTask;
+  }
+
+  /**
+   * Begins the process of rendering a page to the desired context.
+   *
+   * @param {RenderTaskParameters} params - Page render parameters.
+   * @returns {RenderTask} An object that contains a promise that is
+   *   resolved when the page finishes rendering.
+   */
+  renderTask({
+    task: renderTask,
+    intent = "display",
+    annotationMode = AnnotationMode.ENABLE,
+    optionalContentConfigPromise = null,
+    printAnnotationStorage = null,
+  }) {
+    this._stats?.time("Overall");
+
+    const intentArgs = this._transport.getRenderingIntent(
+      intent,
+      annotationMode,
+      printAnnotationStorage
+    );
+    // If there was a pending destroy, cancel it so no cleanup happens during
+    // this call to render...
+    this.#pendingCleanup = false;
+    // ... and ensure that a delayed cleanup is always aborted.
+    this.#abortDelayedCleanup();
+
+    if (!optionalContentConfigPromise) {
+      optionalContentConfigPromise = this._transport.getOptionalContentConfig();
+    }
+
+    let intentState = this._intentStates.get(intentArgs.cacheKey);
+    if (!intentState) {
+      intentState = Object.create(null);
+      this._intentStates.set(intentArgs.cacheKey, intentState);
+    }
+
+    // Ensure that a pending `streamReader` cancel timeout is always aborted.
+    if (intentState.streamReaderCancelTimeout) {
+      clearTimeout(intentState.streamReaderCancelTimeout);
+      intentState.streamReaderCancelTimeout = null;
+    }
+
+    const intentPrint = !!(
+      intentArgs.renderingIntent & RenderingIntentFlag.PRINT
+    );
+
+    // If there's no displayReadyCapability yet, then the operatorList
+    // was never requested before. Make the request and create the promise.
+    if (!intentState.displayReadyCapability) {
+      intentState.displayReadyCapability = new PromiseCapability();
+      intentState.operatorList = {
+        fnArray: [],
+        argsArray: [],
+        lastChunk: false,
+        separateAnnots: null,
+      };
+
+      this._stats?.time("Page Request");
+      this._pumpOperatorList(intentArgs);
+    }
+
+    const complete = error => {
+      intentState.renderTasks.delete(renderTask);
+
+      // Attempt to reduce memory usage during *printing*, by always running
+      // cleanup immediately once rendering has finished.
+      if (this._maybeCleanupAfterRender || intentPrint) {
+        this.#pendingCleanup = true;
+      }
+      this.#tryCleanup(/* delayed = */ !intentPrint);
+
+      if (error) {
+        renderTask.capability.reject(error);
+
+        this._abortOperatorList({
+          intentState,
+          reason: error instanceof Error ? error : new Error(error),
+        });
+      } else {
+        renderTask.capability.resolve();
+      }
+
+      this._stats?.timeEnd("Rendering");
+      this._stats?.timeEnd("Overall");
+    };
+
+    renderTask.operatorList = intentState.operatorList;
+    renderTask.callback = complete;
+
+    (intentState.renderTasks ||= new Set()).add(renderTask);
+    const task = renderTask.task;
+
+    Promise.all([
+      intentState.displayReadyCapability.promise,
+      optionalContentConfigPromise,
+    ])
+      .then(([transparency, optionalContentConfig]) => {
+        if (this.destroyed) {
+          complete();
+          return;
+        }
+        this._stats?.time("Rendering");
+
+        renderTask.initializeGraphics({
+          transparency,
+          optionalContentConfig,
+        });
+        renderTask.operatorListChanged();
+      })
+      .catch(complete);
+
+    return task;
   }
 
   /**
@@ -3463,6 +3605,7 @@ export {
   DefaultFilterFactory,
   DefaultStandardFontDataFactory,
   getDocument,
+  InternalRenderTask,
   LoopbackPort,
   PDFDataRangeTransport,
   PDFDocumentLoadingTask,

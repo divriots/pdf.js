@@ -32,6 +32,8 @@ import {
   CMapCompressionType,
   createValidAbsoluteUrl,
   FeatureTest,
+  FONT_IDENTITY_MATRIX,
+  IDENTITY_MATRIX,
   ImageKind,
   InvalidPDFException,
   MissingPDFException,
@@ -41,19 +43,25 @@ import {
   PermissionFlag,
   PromiseCapability,
   shadow,
+  TextRenderingMode,
   UnexpectedResponseException,
+  unreachable,
   Util,
   VerbosityLevel,
 } from "./shared/util.js";
 import {
   build,
   getDocument,
+  InternalRenderTask,
   PDFDataRangeTransport,
   PDFWorker,
+  RenderTask,
   SVGGraphics,
   version,
 } from "./display/api.js";
 import {
+  getCurrentTransform,
+  getCurrentTransformInverse,
   getFilenameFromUrl,
   getPdfFilenameFromUrl,
   getXfaPageViewport,
@@ -65,10 +73,16 @@ import {
   RenderingCancelledException,
   setLayerDimensions,
 } from "./display/display_utils.js";
+import {
+  getShadingPattern,
+  PathType,
+  TilingPattern,
+} from "./display/pattern_helper.js";
 import { renderTextLayer, updateTextLayer } from "./display/text_layer.js";
 import { AnnotationEditorLayer } from "./display/editor/annotation_editor_layer.js";
 import { AnnotationEditorUIManager } from "./display/editor/tools.js";
 import { AnnotationLayer } from "./display/annotation_layer.js";
+import { convertBlackAndWhiteToRGBA } from "./shared/image_utils.js";
 import { GlobalWorkerOptions } from "./display/worker_options.js";
 import { XfaLayer } from "./display/xfa_layer.js";
 
@@ -89,14 +103,21 @@ export {
   AnnotationMode,
   build,
   CMapCompressionType,
+  convertBlackAndWhiteToRGBA,
   createValidAbsoluteUrl,
   FeatureTest,
+  FONT_IDENTITY_MATRIX,
+  getCurrentTransform,
+  getCurrentTransformInverse,
   getDocument,
   getFilenameFromUrl,
   getPdfFilenameFromUrl,
+  getShadingPattern,
   getXfaPageViewport,
   GlobalWorkerOptions,
+  IDENTITY_MATRIX,
   ImageKind,
+  InternalRenderTask,
   InvalidPDFException,
   isDataScheme,
   isPdfFile,
@@ -105,6 +126,7 @@ export {
   normalizeUnicode,
   OPS,
   PasswordResponses,
+  PathType,
   PDFDataRangeTransport,
   PDFDateString,
   PDFWorker,
@@ -112,11 +134,15 @@ export {
   PixelsPerInch,
   PromiseCapability,
   RenderingCancelledException,
+  RenderTask,
   renderTextLayer,
   setLayerDimensions,
   shadow,
   SVGGraphics,
+  TextRenderingMode,
+  TilingPattern,
   UnexpectedResponseException,
+  unreachable,
   updateTextLayer,
   Util,
   VerbosityLevel,

@@ -1,1 +1,1 @@
-export * from "pdfjs-dist";
+export * from "@divriots/pdfjs-dist";
