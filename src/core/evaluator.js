@@ -2989,7 +2989,7 @@ class PartialEvaluator {
       timeSlotManager.reset();
 
       const operation = {};
-      let stop,
+      let stop,cs,
         args = [];
       while (!(stop = timeSlotManager.check())) {
         // The arguments parsed by read() are not used beyond this loop, so
@@ -3067,13 +3067,28 @@ class PartialEvaluator {
           case OPS.setCharSpacing:
             textState.charSpacing = args[0];
             break;
+          case OPS.setFillColor:
+            cs = stateManager.state.fillColorSpace;
+            textState.color = Util.makeHexColor(...cs.getRgb(args, 0).map(Math.round))
+            break;
+          case OPS.setFillGray:
+            stateManager.state.fillColorSpace = ColorSpace.singletons.gray;
+            textState.color = Util.makeHexColor(...ColorSpace.singletons.gray.getRgb(args, 0).map(Math.round))
+            break;
+          case OPS.setFillCMYKColor:
+            stateManager.state.fillColorSpace = ColorSpace.singletons.cmyk;
+            textState.color = Util.makeHexColor(...ColorSpace.singletons.cmyk.getRgb(args, 0).map(Math.round))
+            break;
           case OPS.setFillRGBColor:
-            const color = Util.makeHexColor(
-              Math.round(args[0] * 255),
-              Math.round(args[1] * 255),
-              Math.round(args[2] * 255)
-            );
-            textState.color = color;
+            stateManager.state.fillColorSpace = ColorSpace.singletons.rgb;
+            textState.color = Util.makeHexColor(...ColorSpace.singletons.rgb.getRgb(args, 0).map(Math.round))
+            break;
+          case OPS.setFillColorN:
+            cs = stateManager.state.fillColorSpace;
+            if (cs.name === "Pattern") {
+              // TODO
+            }
+            textState.color = Util.makeHexColor(...cs.getRgb(args, 0).map(Math.round))
             break;
           case OPS.setWordSpacing:
             textState.wordSpacing = args[0];
