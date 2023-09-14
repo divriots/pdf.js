@@ -52,7 +52,6 @@ import {
 import {
   build,
   getDocument,
-  InternalRenderTask,
   PDFDataRangeTransport,
   PDFWorker,
   RenderTask,
@@ -60,6 +59,7 @@ import {
   version,
 } from "./display/api.js";
 import {
+  DOMSVGFactory,
   getCurrentTransform,
   getCurrentTransformInverse,
   getFilenameFromUrl,
@@ -105,6 +105,7 @@ export {
   CMapCompressionType,
   convertBlackAndWhiteToRGBA,
   createValidAbsoluteUrl,
+  DOMSVGFactory,
   FeatureTest,
   FONT_IDENTITY_MATRIX,
   getCurrentTransform,
@@ -117,7 +118,6 @@ export {
   GlobalWorkerOptions,
   IDENTITY_MATRIX,
   ImageKind,
-  InternalRenderTask,
   InvalidPDFException,
   isDataScheme,
   isPdfFile,
