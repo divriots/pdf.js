@@ -2092,6 +2092,10 @@ class CanvasGraphics {
     return shadow(this, "isFontSubpixelAAEnabled", enabled);
   }
 
+  TextContentItem() {
+    // not needed
+  }
+
   showText(glyphs) {
     const current = this.current;
     const font = current.font;
