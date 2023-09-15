@@ -503,6 +503,7 @@ class Page {
           task,
           resources: this.resources,
           operatorList: opList,
+          viewBox: this.view,
         })
         .then(function () {
           return opList;

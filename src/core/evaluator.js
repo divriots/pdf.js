@@ -983,10 +983,24 @@ class PartialEvaluator {
     operatorList,
     task,
     state,
+    flushTextContentItem,
     fallbackFontDict = null,
     cssFontInfo = null
   ) {
     const fontName = fontArgs?.[0] instanceof Name ? fontArgs[0].name : null;
+    var fontSize = fontArgs[1];
+    // Optimization to ignore multiple identical Tf commands.
+    if (
+      state.font &&
+      fontName === state.fontName &&
+      fontSize === state.fontSize
+    ) {
+      return Promise.resolve(undefined);
+    }
+    flushTextContentItem();
+
+    state.fontName = fontName;
+    state.fontSize = fontSize;
 
     return this.loadFont(
       fontName,
@@ -1018,7 +1032,9 @@ class PartialEvaluator {
           });
       })
       .then(translated => {
+        state.loadedName = translated.loadedName;
         state.font = translated.font;
+        state.fontMatrix = translated.font.fontMatrix || FONT_IDENTITY_MATRIX;
         translated.send(this.handler);
         return translated.loadedName;
       });
@@ -1073,6 +1089,7 @@ class PartialEvaluator {
     stateManager,
     localGStateCache,
     localColorSpaceCache,
+    flushTextContentItem,
   }) {
     const gStateRef = gState.objId;
     let isSimpleGState = true;
@@ -1101,14 +1118,17 @@ class PartialEvaluator {
           promise = promise.then(() => {
             return this.handleSetFont(
               resources,
-              null,
+              [null, value[1]],
               value[0],
               operatorList,
               task,
-              stateManager.state
+              stateManager.state,
+              flushTextContentItem
             ).then(function (loadedName) {
-              operatorList.addDependency(loadedName);
-              gStateObj.push([key, [loadedName, value[1]]]);
+              if (loadedName) {
+                operatorList.addDependency(loadedName);
+                gStateObj.push([key, [loadedName, value[1]]]);
+              }
             });
           });
           break;
@@ -1642,11 +1662,695 @@ class PartialEvaluator {
     operatorList,
     initialState = null,
     fallbackFontDict = null,
+    // FROMTEXT BEGIN
+    includeMarkedContent = false,
+    sink,
+    viewBox = [-Infinity, -Infinity, Infinity, Infinity],
+    markedContentData = null,
+    disableNormalization = false,
+    // FROMTEXT END
   }) {
     // Ensure that `resources`/`initialState` is correctly initialized,
     // even if the provided parameter is e.g. `null`.
     resources ||= Dict.empty;
-    initialState ||= new EvalState();
+    initialState ||= new TextState();
+
+    // FROMTEXT BEGIN
+    if (includeMarkedContent) {
+      markedContentData ||= { level: 0 };
+    }
+
+    // const textContent = {
+    //   items: [],
+    //   styles: Object.create(null),
+    // };
+    const textContentItem = {
+      initialized: false,
+      str: [],
+      totalWidth: 0,
+      totalHeight: 0,
+      width: 0,
+      height: 0,
+      vertical: false,
+      prevTransform: null,
+      textAdvanceScale: 0,
+      spaceInFlowMin: 0,
+      spaceInFlowMax: 0,
+      trackingSpaceMin: Infinity,
+      negativeSpaceMax: -Infinity,
+      notASpace: -Infinity,
+      transform: null,
+      fontName: null,
+      hasEOL: false,
+    };
+
+    // Use a circular buffer (length === 2) to save the last chars in the
+    // text stream.
+    // This implementation of the circular buffer is using a fixed array
+    // and the position of the next element:
+    // function addElement(x) {
+    //   buffer[pos] = x;
+    //   pos = (pos + 1) % buffer.length;
+    // }
+    // It's a way faster than:
+    // function addElement(x) {
+    //   buffer.push(x);
+    //   buffer.shift();
+    // }
+    //
+    // It's useful to know when we need to add a whitespace in the
+    // text chunk.
+    const twoLastChars = [" ", " "];
+    let twoLastCharsPos = 0;
+
+    /**
+     * Save the last char.
+     * @param {string} char
+     * @returns {boolean} true when the two last chars before adding the new one
+     * are a non-whitespace followed by a whitespace.
+     */
+    function saveLastChar(char) {
+      const nextPos = (twoLastCharsPos + 1) % 2;
+      const ret =
+        twoLastChars[twoLastCharsPos] !== " " && twoLastChars[nextPos] === " ";
+      twoLastChars[twoLastCharsPos] = char;
+      twoLastCharsPos = nextPos;
+
+      return ret;
+    }
+
+    function shouldAddWhitepsace() {
+      return (
+        twoLastChars[twoLastCharsPos] !== " " &&
+        twoLastChars[(twoLastCharsPos + 1) % 2] === " "
+      );
+    }
+
+    function resetLastChars() {
+      twoLastChars[0] = twoLastChars[1] = " ";
+      twoLastCharsPos = 0;
+    }
+
+    // Used in addFakeSpaces.
+
+    // A white <= fontSize * TRACKING_SPACE_FACTOR is a tracking space
+    // so it doesn't count as a space.
+    const TRACKING_SPACE_FACTOR = 0.102;
+
+    // When a white <= fontSize * NOT_A_SPACE_FACTOR, there is no space
+    // even if one is present in the text stream.
+    const NOT_A_SPACE_FACTOR = 0.03;
+
+    // A negative white < fontSize * NEGATIVE_SPACE_FACTOR induces
+    // a break (a new chunk of text is created).
+    // It doesn't change anything when the text is copied but
+    // it improves potential mismatch between text layer and canvas.
+    const NEGATIVE_SPACE_FACTOR = -0.2;
+
+    // A white with a width in [fontSize * MIN_FACTOR; fontSize * MAX_FACTOR]
+    // is a space which will be inserted in the current flow of words.
+    // If the width is outside of this range then the flow is broken
+    // (which means a new span in the text layer).
+    // It's useful to adjust the best as possible the span in the layer
+    // to what is displayed in the canvas.
+    const SPACE_IN_FLOW_MIN_FACTOR = 0.102;
+    const SPACE_IN_FLOW_MAX_FACTOR = 0.6;
+
+    // If a char is too high/too low compared to the previous we just create
+    // a new chunk.
+    // If the advance isn't in the +/-VERTICAL_SHIFT_RATIO * height range then
+    // a new chunk is created.
+    const VERTICAL_SHIFT_RATIO = 0.25;
+
+    // const self = this;
+    // const xref = this.xref;
+    const showSpacedTextBuffer = [];
+
+    // The xobj is parsed iff it's needed, e.g. if there is a `DO` cmd.
+    // let xobjs = null;
+    // const emptyXObjectCache = new LocalImageCache();
+    // const emptyGStateCache = new LocalGStateCache();
+
+    // const preprocessor = new EvaluatorPreprocessor(stream, xref, stateManager);
+
+    let textState;
+
+    function pushWhitespace({
+      width = 0,
+      height = 0,
+      transform = textContentItem.prevTransform,
+      fontName = textContentItem.fontName,
+    }) {
+      operatorList.addOp(OPS.TextContentItem, [
+        {
+          str: " ",
+          dir: "ltr",
+          width,
+          height,
+          transform,
+          fontName,
+          hasEOL: false,
+        },
+      ]);
+    }
+
+    function getCurrentTextTransform() {
+      // 9.4.4 Text Space Details
+      const font = textState.font;
+      const tsm = [
+        textState.fontSize * textState.textHScale,
+        0,
+        0,
+        textState.fontSize,
+        0,
+        textState.textRise,
+      ];
+
+      if (
+        font.isType3Font &&
+        (textState.fontSize <= 1 || font.isCharBBox) &&
+        !isArrayEqual(textState.fontMatrix, FONT_IDENTITY_MATRIX)
+      ) {
+        const glyphHeight = font.bbox[3] - font.bbox[1];
+        if (glyphHeight > 0) {
+          tsm[3] *= glyphHeight * textState.fontMatrix[3];
+        }
+      }
+
+      return Util.transform(
+        textState.ctm,
+        Util.transform(textState.textMatrix, tsm)
+      );
+    }
+
+    function ensureTextContentItem() {
+      if (textContentItem.initialized) {
+        return textContentItem;
+      }
+      const { font, loadedName } = textState;
+      textContentItem.fontName = loadedName;
+
+      const trm = (textContentItem.transform = getCurrentTextTransform());
+      if (!font.vertical) {
+        textContentItem.width = textContentItem.totalWidth = 0;
+        textContentItem.height = textContentItem.totalHeight = Math.hypot(
+          trm[2],
+          trm[3]
+        );
+        textContentItem.vertical = false;
+      } else {
+        textContentItem.width = textContentItem.totalWidth = Math.hypot(
+          trm[0],
+          trm[1]
+        );
+        textContentItem.height = textContentItem.totalHeight = 0;
+        textContentItem.vertical = true;
+      }
+
+      const scaleLineX = Math.hypot(
+        textState.textLineMatrix[0],
+        textState.textLineMatrix[1]
+      );
+      const scaleCtmX = Math.hypot(textState.ctm[0], textState.ctm[1]);
+      textContentItem.textAdvanceScale = scaleCtmX * scaleLineX;
+
+      const { fontSize } = textState;
+      textContentItem.trackingSpaceMin = fontSize * TRACKING_SPACE_FACTOR;
+      textContentItem.notASpace = fontSize * NOT_A_SPACE_FACTOR;
+      textContentItem.negativeSpaceMax = fontSize * NEGATIVE_SPACE_FACTOR;
+      textContentItem.spaceInFlowMin = fontSize * SPACE_IN_FLOW_MIN_FACTOR;
+      textContentItem.spaceInFlowMax = fontSize * SPACE_IN_FLOW_MAX_FACTOR;
+      textContentItem.hasEOL = false;
+
+      textContentItem.initialized = true;
+      return textContentItem;
+    }
+
+    function updateAdvanceScale() {
+      if (!textContentItem.initialized) {
+        return;
+      }
+
+      const scaleLineX = Math.hypot(
+        textState.textLineMatrix[0],
+        textState.textLineMatrix[1]
+      );
+      const scaleCtmX = Math.hypot(textState.ctm[0], textState.ctm[1]);
+      const scaleFactor = scaleCtmX * scaleLineX;
+      if (scaleFactor === textContentItem.textAdvanceScale) {
+        return;
+      }
+
+      if (!textContentItem.vertical) {
+        textContentItem.totalWidth +=
+          textContentItem.width * textContentItem.textAdvanceScale;
+        textContentItem.width = 0;
+      } else {
+        textContentItem.totalHeight +=
+          textContentItem.height * textContentItem.textAdvanceScale;
+        textContentItem.height = 0;
+      }
+
+      textContentItem.textAdvanceScale = scaleFactor;
+    }
+
+    function runBidiTransform(textChunk) {
+      let text = textChunk.str.join("");
+      if (!disableNormalization) {
+        text = normalizeUnicode(text);
+      }
+      const bidiResult = bidi(text, -1, textChunk.vertical);
+      return {
+        str: bidiResult.str,
+        dir: bidiResult.dir,
+        width: Math.abs(textChunk.totalWidth),
+        height: Math.abs(textChunk.totalHeight),
+        transform: textChunk.transform,
+        fontName: textChunk.fontName,
+        hasEOL: textChunk.hasEOL,
+        color: textChunk.color,
+      };
+    }
+
+    function applyInverseRotation(x, y, matrix) {
+      const scale = Math.hypot(matrix[0], matrix[1]);
+      return [
+        (matrix[0] * x + matrix[1] * y) / scale,
+        (matrix[2] * x + matrix[3] * y) / scale,
+      ];
+    }
+
+    function compareWithLastPosition(glyphWidth) {
+      const currentTransform = getCurrentTextTransform();
+      let posX = currentTransform[4];
+      let posY = currentTransform[5];
+
+      // Check if the glyph is in the viewbox.
+      if (textState.font?.vertical) {
+        if (
+          posX < viewBox[0] ||
+          posX > viewBox[2] ||
+          posY + glyphWidth < viewBox[1] ||
+          posY > viewBox[3]
+        ) {
+          return false;
+        }
+      } else if (
+        posX + glyphWidth < viewBox[0] ||
+        posX > viewBox[2] ||
+        posY < viewBox[1] ||
+        posY > viewBox[3]
+      ) {
+        return false;
+      }
+
+      if (!textState.font || !textContentItem.prevTransform) {
+        return true;
+      }
+
+      let lastPosX = textContentItem.prevTransform[4];
+      let lastPosY = textContentItem.prevTransform[5];
+
+      if (lastPosX === posX && lastPosY === posY) {
+        return true;
+      }
+
+      let rotate = -1;
+      // Take into account the rotation is the current transform.
+      if (
+        currentTransform[0] &&
+        currentTransform[1] === 0 &&
+        currentTransform[2] === 0
+      ) {
+        rotate = currentTransform[0] > 0 ? 0 : 180;
+      } else if (
+        currentTransform[1] &&
+        currentTransform[0] === 0 &&
+        currentTransform[3] === 0
+      ) {
+        rotate = currentTransform[1] > 0 ? 90 : 270;
+      }
+
+      switch (rotate) {
+        case 0:
+          break;
+        case 90:
+          [posX, posY] = [posY, posX];
+          [lastPosX, lastPosY] = [lastPosY, lastPosX];
+          break;
+        case 180:
+          [posX, posY, lastPosX, lastPosY] = [
+            -posX,
+            -posY,
+            -lastPosX,
+            -lastPosY,
+          ];
+          break;
+        case 270:
+          [posX, posY] = [-posY, -posX];
+          [lastPosX, lastPosY] = [-lastPosY, -lastPosX];
+          break;
+        default:
+          // This is not a 0, 90, 180, 270 rotation so:
+          //  - remove the scale factor from the matrix to get a rotation matrix
+          //  - apply the inverse (which is the transposed) to the positions
+          // and we can then compare positions of the glyphes to detect
+          // a whitespace.
+          [posX, posY] = applyInverseRotation(posX, posY, currentTransform);
+          [lastPosX, lastPosY] = applyInverseRotation(
+            lastPosX,
+            lastPosY,
+            textContentItem.prevTransform
+          );
+      }
+
+      if (textState.font.vertical) {
+        const advanceY = (lastPosY - posY) / textContentItem.textAdvanceScale;
+        const advanceX = posX - lastPosX;
+
+        // When the total height of the current chunk is negative
+        // then we're writing from bottom to top.
+        const textOrientation = Math.sign(textContentItem.height);
+        if (advanceY < textOrientation * textContentItem.negativeSpaceMax) {
+          if (
+            Math.abs(advanceX) >
+            0.5 * textContentItem.width /* not the same column */
+          ) {
+            appendEOL();
+            return true;
+          }
+
+          resetLastChars();
+          flushTextContentItem();
+          return true;
+        }
+
+        if (Math.abs(advanceX) > textContentItem.width) {
+          appendEOL();
+          return true;
+        }
+
+        if (advanceY <= textOrientation * textContentItem.notASpace) {
+          // The real spacing between 2 consecutive chars is thin enough to be
+          // considered a non-space.
+          resetLastChars();
+        }
+
+        if (advanceY <= textOrientation * textContentItem.trackingSpaceMin) {
+          if (shouldAddWhitepsace()) {
+            // The space is very thin, hence it deserves to have its own span in
+            // order to avoid too much shift between the canvas and the text
+            // layer.
+            resetLastChars();
+            flushTextContentItem();
+            pushWhitespace({ height: Math.abs(advanceY) });
+          } else {
+            textContentItem.height += advanceY;
+          }
+        } else if (
+          !addFakeSpaces(
+            advanceY,
+            textContentItem.prevTransform,
+            textOrientation
+          )
+        ) {
+          if (textContentItem.str.length === 0) {
+            resetLastChars();
+            pushWhitespace({ height: Math.abs(advanceY) });
+          } else {
+            textContentItem.height += advanceY;
+          }
+        }
+
+        if (Math.abs(advanceX) > textContentItem.width * VERTICAL_SHIFT_RATIO) {
+          flushTextContentItem();
+        }
+
+        return true;
+      }
+
+      const advanceX = (posX - lastPosX) / textContentItem.textAdvanceScale;
+      const advanceY = posY - lastPosY;
+
+      // When the total width of the current chunk is negative
+      // then we're writing from right to left.
+      const textOrientation = Math.sign(textContentItem.width);
+      if (advanceX < textOrientation * textContentItem.negativeSpaceMax) {
+        if (
+          Math.abs(advanceY) >
+          0.5 * textContentItem.height /* not the same line */
+        ) {
+          appendEOL();
+          return true;
+        }
+
+        // We're moving back so in case the last char was a whitespace
+        // we cancel it: it doesn't make sense to insert it.
+        resetLastChars();
+        flushTextContentItem();
+        return true;
+      }
+
+      if (Math.abs(advanceY) > textContentItem.height) {
+        appendEOL();
+        return true;
+      }
+
+      if (advanceX <= textOrientation * textContentItem.notASpace) {
+        // The real spacing between 2 consecutive chars is thin enough to be
+        // considered a non-space.
+        resetLastChars();
+      }
+
+      if (advanceX <= textOrientation * textContentItem.trackingSpaceMin) {
+        if (shouldAddWhitepsace()) {
+          // The space is very thin, hence it deserves to have its own span in
+          // order to avoid too much shift between the canvas and the text
+          // layer.
+          resetLastChars();
+          flushTextContentItem();
+          pushWhitespace({ width: Math.abs(advanceX) });
+        } else {
+          textContentItem.width += advanceX;
+        }
+      } else if (
+        !addFakeSpaces(advanceX, textContentItem.prevTransform, textOrientation)
+      ) {
+        if (textContentItem.str.length === 0) {
+          resetLastChars();
+          pushWhitespace({ width: Math.abs(advanceX) });
+        } else {
+          textContentItem.width += advanceX;
+        }
+      }
+
+      if (Math.abs(advanceY) > textContentItem.height * VERTICAL_SHIFT_RATIO) {
+        flushTextContentItem();
+      }
+
+      return true;
+    }
+
+    function buildTextContentItem({ chars, extraSpacing }) {
+      const font = textState.font;
+      if (!chars) {
+        // Just move according to the space we have.
+        const charSpacing = textState.charSpacing + extraSpacing;
+        if (charSpacing) {
+          if (!font.vertical) {
+            textState.translateTextMatrix(
+              charSpacing * textState.textHScale,
+              0
+            );
+          } else {
+            textState.translateTextMatrix(0, -charSpacing);
+          }
+        }
+
+        return;
+      }
+
+      const glyphs = font.charsToGlyphs(chars);
+      const scale = textState.fontMatrix[0] * textState.fontSize;
+
+      for (let i = 0, ii = glyphs.length; i < ii; i++) {
+        const glyph = glyphs[i];
+        const { category } = glyph;
+
+        if (category.isInvisibleFormatMark) {
+          continue;
+        }
+        let charSpacing =
+          textState.charSpacing + (i + 1 === ii ? extraSpacing : 0);
+
+        let glyphWidth = glyph.width;
+        if (font.vertical) {
+          glyphWidth = glyph.vmetric ? glyph.vmetric[0] : -glyphWidth;
+        }
+        let scaledDim = glyphWidth * scale;
+
+        if (category.isWhitespace) {
+          // Don't push a " " in the textContentItem
+          // (except when it's between two non-spaces chars),
+          // it will be done (if required) in next call to
+          // compareWithLastPosition.
+          // This way we can merge real spaces and spaces due to cursor moves.
+          if (!font.vertical) {
+            charSpacing += scaledDim + textState.wordSpacing;
+            textState.translateTextMatrix(
+              charSpacing * textState.textHScale,
+              0
+            );
+          } else {
+            charSpacing += -scaledDim + textState.wordSpacing;
+            textState.translateTextMatrix(0, -charSpacing);
+          }
+          saveLastChar(" ");
+          continue;
+        }
+
+        if (
+          textContentItem.initialized &&
+          textContentItem.str.length &&
+          textContentItem.color !== textState.color
+        ) {
+          flushTextContentItem();
+        }
+
+        if (
+          !category.isZeroWidthDiacritic &&
+          !compareWithLastPosition(scaledDim)
+        ) {
+          // The glyph is not in page so just skip it but move the cursor.
+          if (!font.vertical) {
+            textState.translateTextMatrix(scaledDim * textState.textHScale, 0);
+          } else {
+            textState.translateTextMatrix(0, scaledDim);
+          }
+          continue;
+        }
+
+        // Must be called after compareWithLastPosition because
+        // the textContentItem could have been flushed.
+        const textChunk = ensureTextContentItem();
+        textChunk.color = textState.color;
+        if (category.isZeroWidthDiacritic) {
+          scaledDim = 0;
+        }
+
+        if (!font.vertical) {
+          scaledDim *= textState.textHScale;
+          textState.translateTextMatrix(scaledDim, 0);
+          textChunk.width += scaledDim;
+        } else {
+          textState.translateTextMatrix(0, scaledDim);
+          scaledDim = Math.abs(scaledDim);
+          textChunk.height += scaledDim;
+        }
+
+        if (scaledDim) {
+          // Save the position of the last visible character.
+          textChunk.prevTransform = getCurrentTextTransform();
+        }
+
+        const glyphUnicode = glyph.unicode;
+        if (saveLastChar(glyphUnicode)) {
+          // The two last chars are a non-whitespace followed by a whitespace
+          // and then this non-whitespace, so we insert a whitespace here.
+          // Replaces all whitespaces with standard spaces (0x20), to avoid
+          // alignment issues between the textLayer and the canvas if the text
+          // contains e.g. tabs (fixes issue6612.pdf).
+          textChunk.str.push(" ");
+        }
+        textChunk.str.push(glyphUnicode);
+
+        if (charSpacing) {
+          if (!font.vertical) {
+            textState.translateTextMatrix(
+              charSpacing * textState.textHScale,
+              0
+            );
+          } else {
+            textState.translateTextMatrix(0, -charSpacing);
+          }
+        }
+      }
+    }
+
+    function appendEOL() {
+      resetLastChars();
+      if (textContentItem.initialized) {
+        textContentItem.hasEOL = true;
+        flushTextContentItem();
+      } else {
+        operatorList.addOp(OPS.TextContentItem, [
+          {
+            str: "",
+            dir: "ltr",
+            width: 0,
+            height: 0,
+            transform: getCurrentTextTransform(),
+            fontName: textState.loadedName,
+            hasEOL: true,
+          },
+        ]);
+      }
+    }
+
+    function addFakeSpaces(width, transf, textOrientation) {
+      if (
+        textOrientation * textContentItem.spaceInFlowMin <= width &&
+        width <= textOrientation * textContentItem.spaceInFlowMax
+      ) {
+        if (textContentItem.initialized) {
+          resetLastChars();
+          textContentItem.str.push(" ");
+        }
+        return false;
+      }
+
+      const fontName = textContentItem.fontName;
+
+      let height = 0;
+      if (textContentItem.vertical) {
+        height = width;
+        width = 0;
+      }
+
+      flushTextContentItem();
+      resetLastChars();
+      pushWhitespace({
+        width: Math.abs(width),
+        height: Math.abs(height),
+        transform: transf || getCurrentTextTransform(),
+        fontName,
+      });
+
+      return true;
+    }
+
+    function flushTextContentItem() {
+      if (!textContentItem.initialized || !textContentItem.str) {
+        return;
+      }
+
+      // Do final text scaling.
+      if (!textContentItem.vertical) {
+        textContentItem.totalWidth +=
+          textContentItem.width * textContentItem.textAdvanceScale;
+      } else {
+        textContentItem.totalHeight +=
+          textContentItem.height * textContentItem.textAdvanceScale;
+      }
+
+      operatorList.addOp(OPS.TextContentItem, [
+        runBidiTransform(textContentItem),
+      ]);
+      textContentItem.initialized = false;
+      textContentItem.str.length = 0;
+    }
+
+    // FROMTEXT END
 
     if (!operatorList) {
       throw new Error('getOperatorList: missing "operatorList" parameter');
@@ -1700,8 +2404,11 @@ class PartialEvaluator {
         let args = operation.args;
         let fn = operation.fn;
 
+        const previousState = textState;
+        textState = stateManager.state;
         switch (fn | 0) {
           case OPS.paintXObject:
+            flushTextContentItem();
             // eagerly compile XForm objects
             isValidName = args[0] instanceof Name;
             name = args[0].name;
@@ -1783,6 +2490,13 @@ class PartialEvaluator {
                       task,
                       stateManager.state.clone(),
                       localColorSpaceCache
+                      // TODO add those
+                      // includeMarkedContent,
+                      // sink: sinkWrapper,
+                      // seenStyles,
+                      // viewBox,
+                      // markedContentData,
+                      // disableNormalization,
                     )
                     .then(function () {
                       stateManager.restore();
@@ -1835,15 +2549,20 @@ class PartialEvaluator {
                   operatorList,
                   task,
                   stateManager.state,
+                  flushTextContentItem,
                   fallbackFontDict
                 )
                 .then(function (loadedName) {
-                  operatorList.addDependency(loadedName);
-                  operatorList.addOp(OPS.setFont, [loadedName, fontSize]);
+                  if (loadedName) {
+                    operatorList.addDependency(loadedName);
+                    operatorList.addOp(OPS.setFont, [loadedName, fontSize]);
+                  }
                 })
             );
             return;
           case OPS.beginText:
+            textState.textMatrix = IDENTITY_MATRIX.slice();
+            textState.textLineMatrix = IDENTITY_MATRIX.slice();
             parsingText = true;
             break;
           case OPS.endText:
@@ -1882,12 +2601,50 @@ class PartialEvaluator {
               self.ensureStateFont(stateManager.state);
               continue;
             }
+            buildTextContentItem({
+              chars: args[0],
+              extraSpacing: 0,
+            });
             args[0] = self.handleText(args[0], stateManager.state);
             break;
           case OPS.showSpacedText:
             if (!stateManager.state.font) {
               self.ensureStateFont(stateManager.state);
               continue;
+            }
+
+            const spaceFactor =
+              ((textState.font.vertical ? 1 : -1) * textState.fontSize) / 1000;
+            const elements = args[0];
+            for (let i = 0, ii = elements.length; i < ii; i++) {
+              const item = elements[i];
+              if (typeof item === "string") {
+                showSpacedTextBuffer.push(item);
+              } else if (typeof item === "number" && item !== 0) {
+                // PDF Specification 5.3.2 states:
+                // The number is expressed in thousandths of a unit of text
+                // space.
+                // This amount is subtracted from the current horizontal or
+                // vertical coordinate, depending on the writing mode.
+                // In the default coordinate system, a positive adjustment
+                // has the effect of moving the next glyph painted either to
+                // the left or down by the given amount.
+                const str = showSpacedTextBuffer.join("");
+                showSpacedTextBuffer.length = 0;
+                buildTextContentItem({
+                  chars: str,
+                  extraSpacing: item * spaceFactor,
+                });
+              }
+            }
+
+            if (showSpacedTextBuffer.length > 0) {
+              const str = showSpacedTextBuffer.join("");
+              showSpacedTextBuffer.length = 0;
+              buildTextContentItem({
+                chars: str,
+                extraSpacing: 0,
+              });
             }
             var combinedGlyphs = [];
             var state = stateManager.state;
@@ -1906,6 +2663,11 @@ class PartialEvaluator {
               self.ensureStateFont(stateManager.state);
               continue;
             }
+            textState.carriageReturn();
+            buildTextContentItem({
+              chars: args[0],
+              extraSpacing: 0,
+            });
             operatorList.addOp(OPS.nextLine);
             args[0] = self.handleText(args[0], stateManager.state);
             fn = OPS.showText;
@@ -1915,6 +2677,13 @@ class PartialEvaluator {
               self.ensureStateFont(stateManager.state);
               continue;
             }
+            textState.wordSpacing = args[0];
+            textState.charSpacing = args[1];
+            textState.carriageReturn();
+            buildTextContentItem({
+              chars: args[2],
+              extraSpacing: 0,
+            });
             operatorList.addOp(OPS.nextLine);
             operatorList.addOp(OPS.setWordSpacing, [args.shift()]);
             operatorList.addOp(OPS.setCharSpacing, [args.shift()]);
@@ -1981,6 +2750,7 @@ class PartialEvaluator {
             cs = stateManager.state.fillColorSpace;
             args = cs.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
+            textState.color = Util.makeHexColor(...args.map(Math.round))
             break;
           case OPS.setStrokeColor:
             cs = stateManager.state.strokeColorSpace;
@@ -1991,6 +2761,7 @@ class PartialEvaluator {
             stateManager.state.fillColorSpace = ColorSpace.singletons.gray;
             args = ColorSpace.singletons.gray.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
+            textState.color = Util.makeHexColor(...args.map(Math.round))
             break;
           case OPS.setStrokeGray:
             stateManager.state.strokeColorSpace = ColorSpace.singletons.gray;
@@ -2001,6 +2772,7 @@ class PartialEvaluator {
             stateManager.state.fillColorSpace = ColorSpace.singletons.cmyk;
             args = ColorSpace.singletons.cmyk.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
+            textState.color = Util.makeHexColor(...args.map(Math.round))
             break;
           case OPS.setStrokeCMYKColor:
             stateManager.state.strokeColorSpace = ColorSpace.singletons.cmyk;
@@ -2010,6 +2782,7 @@ class PartialEvaluator {
           case OPS.setFillRGBColor:
             stateManager.state.fillColorSpace = ColorSpace.singletons.rgb;
             args = ColorSpace.singletons.rgb.getRgb(args, 0);
+            textState.color = Util.makeHexColor(...args.map(Math.round))
             break;
           case OPS.setStrokeRGBColor:
             stateManager.state.strokeColorSpace = ColorSpace.singletons.rgb;
@@ -2036,6 +2809,7 @@ class PartialEvaluator {
             }
             args = cs.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
+            textState.color = Util.makeHexColor(...args.map(Math.round))
             break;
           case OPS.setStrokeColorN:
             cs = stateManager.state.strokeColorSpace;
@@ -2123,6 +2897,7 @@ class PartialEvaluator {
                     stateManager,
                     localGStateCache,
                     localColorSpaceCache,
+                    flushTextContentItem,
                   })
                   .then(resolveGState, rejectGState);
               }).catch(function (reason) {
@@ -2158,6 +2933,12 @@ class PartialEvaluator {
             // but doing so is meaningless without knowing the semantics.
             continue;
           case OPS.beginMarkedContentProps:
+
+            flushTextContentItem();
+            if (includeMarkedContent) {
+              markedContentData.level++;
+            }
+
             if (!(args[0] instanceof Name)) {
               warn(`Expected name for beginMarkedContentProps arg0=${args[0]}`);
               continue;
@@ -2194,8 +2975,80 @@ class PartialEvaluator {
             ];
 
             break;
+          case OPS.setTextRise:
+            textState.textRise = args[0];
+            break;
+          case OPS.setHScale:
+            textState.textHScale = args[0] / 100;
+            break;
+          case OPS.setLeading:
+            textState.leading = args[0];
+            break;
+          case OPS.moveText:
+            textState.translateTextLineMatrix(args[0], args[1]);
+            textState.textMatrix = textState.textLineMatrix.slice();
+            break;
+          case OPS.setLeadingMoveText:
+            textState.leading = -args[1];
+            textState.translateTextLineMatrix(args[0], args[1]);
+            textState.textMatrix = textState.textLineMatrix.slice();
+            break;
+          case OPS.nextLine:
+            textState.carriageReturn();
+            break;
+          case OPS.setTextMatrix:
+            textState.setTextMatrix(
+              args[0],
+              args[1],
+              args[2],
+              args[3],
+              args[4],
+              args[5]
+            );
+            textState.setTextLineMatrix(
+              args[0],
+              args[1],
+              args[2],
+              args[3],
+              args[4],
+              args[5]
+            );
+            updateAdvanceScale();
+            break;
+          case OPS.setCharSpacing:
+            textState.charSpacing = args[0];
+            break;
+          case OPS.setWordSpacing:
+            textState.wordSpacing = args[0];
+            break;
           case OPS.beginMarkedContent:
+            flushTextContentItem();
+            args = [args[0].name];
+            if (includeMarkedContent) {
+              markedContentData.level++;
+            }
+            break;
           case OPS.endMarkedContent:
+            flushTextContentItem();
+            if (includeMarkedContent) {
+              if (markedContentData.level === 0) {
+                // Handle unbalanced beginMarkedContent/endMarkedContent
+                // operators (fixes issue15629.pdf).
+                break;
+              }
+              markedContentData.level--;
+            }
+            break;
+          case OPS.restore:
+            if (
+              previousState &&
+              (previousState.font !== textState.font ||
+                previousState.fontSize !== textState.fontSize ||
+                previousState.fontName !== textState.fontName)
+            ) {
+              flushTextContentItem();
+            }
+            break;
           default:
             // Note: Ignore the operator if it has `Dict` arguments, since
             // those are non-serializable, otherwise postMessage will throw
@@ -4694,6 +5547,9 @@ class TextState {
     this.fontMatrix = FONT_IDENTITY_MATRIX;
     this.textMatrix = IDENTITY_MATRIX.slice();
     this.textLineMatrix = IDENTITY_MATRIX.slice();
+    this.textRenderingMode = TextRenderingMode.FILL;
+    this.fillColorSpace = ColorSpace.singletons.gray;
+    this.strokeColorSpace = ColorSpace.singletons.gray;
     this.charSpacing = 0;
     this.wordSpacing = 0;
     this.leading = 0;
