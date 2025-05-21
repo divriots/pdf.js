@@ -13,9 +13,10 @@
  * limitations under the License.
  */
 
-import { createActionsMap, getFieldType } from "./common.js";
+import { createActionsMap, FieldType, getFieldType } from "./common.js";
 import { Color } from "./color.js";
 import { PDFObject } from "./pdf_object.js";
+import { serializeError } from "./app_utils.js";
 
 class Field extends PDFObject {
   constructor(data) {
@@ -245,7 +246,12 @@ class Field extends PDFObject {
       return;
     }
 
-    if (value === "" || typeof value !== "string") {
+    if (
+      value === "" ||
+      typeof value !== "string" ||
+      // When the field type is date or time, the value must be a string.
+      this._fieldType >= FieldType.date
+    ) {
       this._originalValue = undefined;
       this._value = value;
       return;
@@ -547,14 +553,15 @@ class Field extends PDFObject {
     }
 
     const actions = this._actions.get(eventName);
-    try {
-      for (const action of actions) {
+    for (const action of actions) {
+      try {
         // Action evaluation must happen in the global scope
         this._globalEval(action);
+      } catch (error) {
+        const serializedError = serializeError(error);
+        serializedError.value = `Error when executing "${eventName}" for field "${this._id}"\n${serializedError.value}`;
+        this._send(serializedError);
       }
-    } catch (error) {
-      event.rc = false;
-      throw error;
     }
 
     return true;
@@ -581,6 +588,12 @@ class RadioButtonField extends Field {
     this._hasBeenInitialized = true;
     this._value = data.value || "";
   }
+
+  get _siblings() {
+    return this._radioIds.filter(id => id !== this._id);
+  }
+
+  set _siblings(_) {}
 
   get value() {
     return this._value;

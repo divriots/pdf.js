@@ -40,7 +40,7 @@
 
 "use strict";
 
-import { TestReporter } from "../unit/testreporter.js";
+import { TestReporter } from "../reporter.js";
 
 async function initializePDFJS(callback) {
   await Promise.all(
@@ -49,10 +49,7 @@ async function initializePDFJS(callback) {
       "pdfjs-test/font/font_os2_spec.js",
       "pdfjs-test/font/font_post_spec.js",
       "pdfjs-test/font/font_fpgm_spec.js",
-    ].map(function (moduleName) {
-      // eslint-disable-next-line no-unsanitized/method
-      return import(moduleName);
-    })
+    ].map(moduleName => import(moduleName)) // eslint-disable-line no-unsanitized/method
   );
 
   callback();

@@ -14,76 +14,58 @@
  * limitations under the License.
  */
 
-import { fileURLToPath } from "url";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { spawn } from "child_process";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+let ttxTaskId = Date.now();
 
-const ttxResourcesHome = path.join(__dirname, "..", "ttx");
-
-let nextTTXTaskId = Date.now();
-
-function runTtx(ttxResourcesHomePath, fontPath, registerOnCancel, callback) {
-  fs.realpath(ttxResourcesHomePath, function (error, realTtxResourcesHomePath) {
-    const fontToolsHome = path.join(realTtxResourcesHomePath, "fonttools-code");
-    fs.realpath(fontPath, function (errorFontPath, realFontPath) {
-      const ttxPath = path.join("Lib", "fontTools", "ttx.py");
-      if (!fs.existsSync(path.join(fontToolsHome, ttxPath))) {
-        callback("TTX was not found, please checkout PDF.js submodules");
-        return;
-      }
-      const ttxEnv = {
-        PYTHONPATH: path.join(fontToolsHome, "Lib"),
-        PYTHONDONTWRITEBYTECODE: true,
-      };
-      const ttxStdioMode = "ignore";
-      const python = process.platform !== "win32" ? "python2" : "python";
-      const ttx = spawn(python, [ttxPath, realFontPath], {
-        cwd: fontToolsHome,
-        stdio: ttxStdioMode,
-        env: ttxEnv,
-      });
-      let ttxRunError;
-      registerOnCancel(function (reason) {
-        ttxRunError = reason;
-        callback(reason);
-        ttx.kill();
-      });
-      ttx.on("error", function (errorTtx) {
-        ttxRunError = errorTtx;
-        callback("Unable to execute ttx");
-      });
-      ttx.on("close", function (code) {
-        if (ttxRunError) {
-          return;
-        }
-        callback();
-      });
+function runTtx(fontPath) {
+  return new Promise((resolve, reject) => {
+    const ttx = spawn("ttx", [fontPath], { stdio: "ignore" });
+    ttx.on("error", () => {
+      reject(
+        new Error(
+          "Unable to execute `ttx`; make sure the `fonttools` dependency is installed"
+        )
+      );
+    });
+    ttx.on("close", () => {
+      resolve();
     });
   });
 }
 
-function translateFont(content, registerOnCancel, callback) {
+async function translateFont(content) {
   const buffer = Buffer.from(content, "base64");
-  const taskId = (nextTTXTaskId++).toString();
-  const fontPath = path.join(ttxResourcesHome, taskId + ".otf");
-  const resultPath = path.join(ttxResourcesHome, taskId + ".ttx");
+  const taskId = (ttxTaskId++).toString();
+  const fontPath = path.join(os.tmpdir(), `pdfjs-font-test-${taskId}.otf`);
+  const resultPath = path.join(os.tmpdir(), `pdfjs-font-test-${taskId}.ttx`);
 
+  // Write the font data to a temporary file on disk (because TTX only accepts
+  // files as input).
   fs.writeFileSync(fontPath, buffer);
-  runTtx(ttxResourcesHome, fontPath, registerOnCancel, function (err) {
-    fs.unlinkSync(fontPath);
-    if (err) {
-      console.error(err);
-      callback(err);
-    } else if (!fs.existsSync(resultPath)) {
-      callback("Output was not generated");
-    } else {
-      callback(null, fs.readFileSync(resultPath));
-      fs.unlinkSync(resultPath);
-    }
-  });
+
+  // Run TTX on the temporary font file.
+  let ttxError;
+  try {
+    await runTtx(fontPath);
+  } catch (error) {
+    ttxError = error;
+  }
+
+  // Remove the temporary font/result files and report on the outcome.
+  fs.unlinkSync(fontPath);
+  if (ttxError) {
+    throw ttxError;
+  }
+  if (!fs.existsSync(resultPath)) {
+    throw new Error("TTX did not generate output");
+  }
+  const xml = fs.readFileSync(resultPath);
+  fs.unlinkSync(resultPath);
+  return xml;
 }
 
 export { translateFont };

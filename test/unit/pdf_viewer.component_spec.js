@@ -30,7 +30,6 @@ import { AnnotationLayerBuilder } from "../../web/annotation_layer_builder.js";
 import { DownloadManager } from "../../web/download_manager.js";
 import { EventBus } from "../../web/event_utils.js";
 import { GenericL10n } from "../../web/genericl10n.js";
-import { NullL10n } from "../../web/l10n_utils.js";
 import { PDFHistory } from "../../web/pdf_history.js";
 import { PDFPageView } from "../../web/pdf_page_view.js";
 import { PDFScriptingManager } from "../../web/pdf_scripting_manager.component.js";
@@ -40,36 +39,41 @@ import { StructTreeLayerBuilder } from "../../web/struct_tree_layer_builder.js";
 import { TextLayerBuilder } from "../../web/text_layer_builder.js";
 import { XfaLayerBuilder } from "../../web/xfa_layer_builder.js";
 
+const expectedAPI = Object.freeze({
+  AnnotationLayerBuilder,
+  DownloadManager,
+  EventBus,
+  FindState,
+  GenericL10n,
+  LinkTarget,
+  parseQueryString,
+  PDFFindController,
+  PDFHistory,
+  PDFLinkService,
+  PDFPageView,
+  PDFScriptingManager,
+  PDFSinglePageViewer,
+  PDFViewer,
+  ProgressBar,
+  RenderingStates,
+  ScrollMode,
+  SimpleLinkService,
+  SpreadMode,
+  StructTreeLayerBuilder,
+  TextLayerBuilder,
+  XfaLayerBuilder,
+});
+
 describe("pdfviewer_api", function () {
   it("checks that the *official* PDF.js-viewer API exposes the expected functionality", async function () {
     const pdfviewerAPI = await import("../../web/pdf_viewer.component.js");
 
     // The imported Object contains an (automatically) inserted Symbol,
     // hence we copy the data to allow using a simple comparison below.
-    expect({ ...pdfviewerAPI }).toEqual({
-      AnnotationLayerBuilder,
-      DownloadManager,
-      EventBus,
-      FindState,
-      GenericL10n,
-      LinkTarget,
-      NullL10n,
-      parseQueryString,
-      PDFFindController,
-      PDFHistory,
-      PDFLinkService,
-      PDFPageView,
-      PDFScriptingManager,
-      PDFSinglePageViewer,
-      PDFViewer,
-      ProgressBar,
-      RenderingStates,
-      ScrollMode,
-      SimpleLinkService,
-      SpreadMode,
-      StructTreeLayerBuilder,
-      TextLayerBuilder,
-      XfaLayerBuilder,
-    });
+    expect({ ...pdfviewerAPI }).toEqual(expectedAPI);
+
+    expect(Object.keys(globalThis.pdfjsViewer).sort()).toEqual(
+      Object.keys(expectedAPI).sort()
+    );
   });
 });

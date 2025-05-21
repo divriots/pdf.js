@@ -377,9 +377,7 @@ describe("CFFCompiler", function () {
     bytes = new Uint8Array(bytes);
     return new CFFParser(
       {
-        getBytes: () => {
-          return bytes;
-        },
+        getBytes: () => bytes,
       },
       {},
       SEAC_ANALYSIS_ENABLED
@@ -483,7 +481,7 @@ describe("CFFCompiler", function () {
       0, // cid (high)
       0, // cid (low)
       0, // nLeft (high)
-      numGlyphs - 1, // nLeft (low)
+      numGlyphs - 2, // nLeft (low)
     ]);
   });
 

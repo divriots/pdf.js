@@ -248,8 +248,12 @@ class Parser {
           }
           // Check that the "EI" sequence isn't part of the image data, since
           // that would cause the image to be truncated (fixes issue11124.pdf).
+          //
+          // Check more than the `followingBytes` to be able to find operators
+          // with multiple arguments, e.g. transform (cm) with decimal arguments
+          // (fixes issue19494.pdf).
           const tmpLexer = new Lexer(
-            new Stream(followingBytes.slice()),
+            new Stream(stream.peekBytes(5 * n)),
             knownCommands
           );
           // Reduce the number of (potential) warning messages.
@@ -609,12 +613,27 @@ class Parser {
     return imageStream;
   }
 
-  _findStreamLength(startPos, signature) {
+  #findStreamLength(startPos) {
     const { stream } = this.lexer;
     stream.pos = startPos;
 
     const SCAN_BLOCK_LENGTH = 2048;
-    const signatureLength = signature.length;
+    const signatureLength = "endstream".length;
+
+    const END_SIGNATURE = new Uint8Array([0x65, 0x6e, 0x64]);
+    const endLength = END_SIGNATURE.length;
+
+    // Ideally we'd directly search for "endstream", however there are corrupt
+    // PDF documents where the command is incomplete; hence we search for:
+    //  1. The normal case.
+    //  2. The misspelled case (fixes issue18122.pdf).
+    //  3. The truncated case (fixes issue10004.pdf).
+    const PARTIAL_SIGNATURE = [
+      new Uint8Array([0x73, 0x74, 0x72, 0x65, 0x61, 0x6d]), // "stream"
+      new Uint8Array([0x73, 0x74, 0x65, 0x61, 0x6d]), // "steam",
+      new Uint8Array([0x73, 0x74, 0x72, 0x65, 0x61]), // "strea"
+    ];
+    const normalLength = signatureLength - endLength;
 
     while (stream.pos < stream.end) {
       const scanBytes = stream.peekBytes(SCAN_BLOCK_LENGTH);
@@ -626,13 +645,43 @@ class Parser {
       let pos = 0;
       while (pos < scanLength) {
         let j = 0;
-        while (j < signatureLength && scanBytes[pos + j] === signature[j]) {
+        while (j < endLength && scanBytes[pos + j] === END_SIGNATURE[j]) {
           j++;
         }
-        if (j >= signatureLength) {
-          // `signature` found.
-          stream.pos += pos;
-          return stream.pos - startPos;
+        if (j >= endLength) {
+          // "end" found, find the complete command.
+          let found = false;
+          for (const part of PARTIAL_SIGNATURE) {
+            const partLen = part.length;
+            let k = 0;
+            while (k < partLen && scanBytes[pos + j + k] === part[k]) {
+              k++;
+            }
+            if (k >= normalLength) {
+              // Found "endstream" command.
+              found = true;
+              break;
+            }
+            if (k >= partLen) {
+              // Found "endsteam" or "endstea" command.
+              // Ensure that the byte immediately following the corrupt
+              // endstream command is a space, to prevent false positives.
+              const lastByte = scanBytes[pos + j + k];
+              if (isWhiteSpace(lastByte)) {
+                info(
+                  `Found "${bytesToString([...END_SIGNATURE, ...part])}" when ` +
+                    "searching for endstream command."
+                );
+                found = true;
+              }
+              break;
+            }
+          }
+
+          if (found) {
+            stream.pos += pos;
+            return stream.pos - startPos;
+          }
         }
         pos++;
       }
@@ -665,45 +714,10 @@ class Parser {
       this.shift(); // 'stream'
     } else {
       // Bad stream length, scanning for endstream command.
-      const ENDSTREAM_SIGNATURE = new Uint8Array([
-        0x65, 0x6e, 0x64, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6d,
-      ]);
-      let actualLength = this._findStreamLength(startPos, ENDSTREAM_SIGNATURE);
-      if (actualLength < 0) {
-        // Only allow limited truncation of the endstream signature,
-        // to prevent false positives.
-        const MAX_TRUNCATION = 1;
-        // Check if the PDF generator included truncated endstream commands,
-        // such as e.g. "endstrea" (fixes issue10004.pdf).
-        for (let i = 1; i <= MAX_TRUNCATION; i++) {
-          const end = ENDSTREAM_SIGNATURE.length - i;
-          const TRUNCATED_SIGNATURE = ENDSTREAM_SIGNATURE.slice(0, end);
-
-          const maybeLength = this._findStreamLength(
-            startPos,
-            TRUNCATED_SIGNATURE
-          );
-          if (maybeLength >= 0) {
-            // Ensure that the byte immediately following the truncated
-            // endstream command is a space, to prevent false positives.
-            const lastByte = stream.peekBytes(end + 1)[end];
-            if (!isWhiteSpace(lastByte)) {
-              break;
-            }
-            info(
-              `Found "${bytesToString(TRUNCATED_SIGNATURE)}" when ` +
-                "searching for endstream command."
-            );
-            actualLength = maybeLength;
-            break;
-          }
-        }
-
-        if (actualLength < 0) {
-          throw new FormatError("Missing endstream command.");
-        }
+      length = this.#findStreamLength(startPos);
+      if (length < 0) {
+        throw new FormatError("Missing endstream command.");
       }
-      length = actualLength;
 
       lexer.nextChar();
       this.shift();
@@ -919,9 +933,14 @@ class Lexer {
     if (ch < /* '0' = */ 0x30 || ch > /* '9' = */ 0x39) {
       const msg = `Invalid number: ${String.fromCharCode(ch)} (charCode ${ch})`;
 
-      if (isWhiteSpace(ch) || ch === /* EOF = */ -1) {
+      if (
+        isWhiteSpace(ch) ||
+        /* '(' = */ ch === 0x28 ||
+        /* '<' = */ ch === 0x3c ||
+        ch === /* EOF = */ -1
+      ) {
         // This is consistent with Adobe Reader (fixes issue9252.pdf,
-        // issue15604.pdf, bug1753983.pdf).
+        // issue15604.pdf, bug1753983.pdf, bug1953099.pdf).
         info(`Lexer.getNumber - "${msg}".`);
         return 0;
       }
@@ -1153,8 +1172,8 @@ class Lexer {
     const strBuf = this.strBuf;
     strBuf.length = 0;
     let ch = this.currentChar;
-    let isFirstHex = true;
-    let firstDigit, secondDigit;
+    let firstDigit = -1,
+      digit = -1;
     this._hexStringNumWarn = 0;
 
     while (true) {
@@ -1168,25 +1187,24 @@ class Lexer {
         ch = this.nextChar();
         continue;
       } else {
-        if (isFirstHex) {
-          firstDigit = toHexDigit(ch);
-          if (firstDigit === -1) {
-            this._hexStringWarn(ch);
-            ch = this.nextChar();
-            continue;
-          }
+        digit = toHexDigit(ch);
+        if (digit === -1) {
+          this._hexStringWarn(ch);
+        } else if (firstDigit === -1) {
+          firstDigit = digit;
         } else {
-          secondDigit = toHexDigit(ch);
-          if (secondDigit === -1) {
-            this._hexStringWarn(ch);
-            ch = this.nextChar();
-            continue;
-          }
-          strBuf.push(String.fromCharCode((firstDigit << 4) | secondDigit));
+          strBuf.push(String.fromCharCode((firstDigit << 4) | digit));
+          firstDigit = -1;
         }
-        isFirstHex = !isFirstHex;
         ch = this.nextChar();
       }
+    }
+
+    // According to the PDF spec, section "7.3.4.3 Hexadecimal Strings":
+    //  "If the final digit of a hexadecimal string is missing—that is, if there
+    //   is an odd number of digits—the final digit shall be assumed to be 0."
+    if (firstDigit !== -1) {
+      strBuf.push(String.fromCharCode(firstDigit << 4));
     }
     return strBuf.join("");
   }

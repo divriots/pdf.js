@@ -13,10 +13,26 @@
  * limitations under the License.
  */
 
-import { getVerbosityLevel, setVerbosityLevel } from "../../src/shared/util.js";
-import { Jbig2Image } from "../../src/core/jbig2.js";
-import { JpegImage } from "../../src/core/jpg.js";
-import { JpxImage } from "../../src/core/jpx.js";
+import {
+  getVerbosityLevel,
+  setVerbosityLevel,
+  VerbosityLevel,
+} from "../../src/shared/util.js";
+import { Jbig2Error, Jbig2Image } from "../../src/core/jbig2.js";
+import { JpegError, JpegImage } from "../../src/core/jpg.js";
+import { JpxError, JpxImage } from "../../src/core/jpx.js";
+
+const expectedAPI = Object.freeze({
+  getVerbosityLevel,
+  Jbig2Error,
+  Jbig2Image,
+  JpegError,
+  JpegImage,
+  JpxError,
+  JpxImage,
+  setVerbosityLevel,
+  VerbosityLevel,
+});
 
 describe("pdfimage_api", function () {
   it("checks that the *official* PDF.js-image decoders API exposes the expected functionality", async function () {
@@ -29,12 +45,10 @@ describe("pdfimage_api", function () {
 
     // The imported Object contains an (automatically) inserted Symbol,
     // hence we copy the data to allow using a simple comparison below.
-    expect({ ...pdfimageAPI }).toEqual({
-      getVerbosityLevel,
-      Jbig2Image,
-      JpegImage,
-      JpxImage,
-      setVerbosityLevel,
-    });
+    expect({ ...pdfimageAPI }).toEqual(expectedAPI);
+
+    expect(Object.keys(globalThis.pdfjsImageDecoders).sort()).toEqual(
+      Object.keys(expectedAPI).sort()
+    );
   });
 });

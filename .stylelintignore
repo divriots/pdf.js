@@ -3,12 +3,11 @@ l10n/
 docs/
 node_modules/
 external/bcmaps/
-external/webL10n/
 external/builder/fixtures/
-external/builder/fixtures_esprima/
+external/builder/fixtures_babel/
 external/quickjs/
-src/shared/cffStandardStrings.js
-src/shared/fonts_utils.js
+test/stats/results/
 test/tmp/
 test/pdfs/
+web/locale/
 *~/

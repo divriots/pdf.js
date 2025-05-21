@@ -22,47 +22,32 @@
   --toolbar-icon-opacity: 1;
   --doorhanger-icon-opacity: 0.9;
 
-  --main-color: rgba(12, 12, 13, 1);
-  --body-bg-color: rgba(212, 212, 215, 1);
-  --scrollbar-color: auto;
-  --scrollbar-bg-color: auto;
-  --field-color: rgba(6, 6, 6, 1);
-  --field-bg-color: rgba(255, 255, 255, 1);
-  --field-border-color: rgba(187, 187, 188, 1);
-  --doorhanger-bg-color: rgba(255, 255, 255, 1);
+  --main-color: light-dark(rgb(12 12 13), rgb(249 249 250));
+  --body-bg-color: light-dark(rgb(212 212 215), rgb(42 42 46));
+  --scrollbar-color: light-dark(auto, rgb(121 121 123));
+  --scrollbar-bg-color: light-dark(auto, rgb(35 35 39));
+  --field-color: light-dark(rgb(6 6 6), rgb(250 250 250));
+  --field-bg-color: light-dark(rgb(255 255 255), rgb(64 64 68));
+  --field-border-color: light-dark(rgb(187 187 188), rgb(115 115 115));
+  --doorhanger-bg-color: light-dark(rgb(255 255 255), rgb(74 74 79));
   --dialog-button-border: none;
-  --dialog-button-bg-color: rgba(12, 12, 13, 0.1);
-  --dialog-button-hover-bg-color: rgba(12, 12, 13, 0.3);
+  --dialog-button-bg-color: light-dark(rgb(12 12 13 / 0.1), rgb(92 92 97));
+  --dialog-button-hover-bg-color: light-dark(
+    rgb(12 12 13 / 0.3),
+    rgb(115 115 115)
+  );
 
-  --toolbar-bg-color: #f9f9fb;
-  --toolbar-divider-color: #e0e0e6;
-  --toolbar-fg-color: #15141a;
+  --toolbar-bg-color: light-dark(#f9f9fb, #2b2a33);
+  --toolbar-divider-color: light-dark(#e0e0e6, #5b5b66);
+  --toolbar-fg-color: light-dark(#15141a, #fbfbfe);
+  --toolbar-height: 48px;
+  --toolbar-border-width: 1px;
 
   --toolbarButton-download-icon: url(images/gv-toolbarButton-download.svg);
-  --toolbarButton-openinapp-icon: url(images/gv-toolbarButton-openinapp.svg);
 }
 
 :root:dir(rtl) {
   --dir-factor: -1;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --main-color: rgba(249, 249, 250, 1);
-    --body-bg-color: rgba(42, 42, 46, 1);
-    --scrollbar-color: rgba(121, 121, 123, 1);
-    --scrollbar-bg-color: rgba(35, 35, 39, 1);
-    --field-color: rgba(250, 250, 250, 1);
-    --field-bg-color: rgba(64, 64, 68, 1);
-    --field-border-color: rgba(115, 115, 115, 1);
-    --doorhanger-bg-color: rgba(74, 74, 79, 1);
-    --dialog-button-bg-color: rgba(92, 92, 97, 1);
-    --dialog-button-hover-bg-color: rgba(115, 115, 115, 1);
-
-    --toolbar-bg-color: #2b2a33;
-    --toolbar-divider-color: #5b5b66;
-    --toolbar-fg-color: #fbfbfe;
-  }
 }
 
 @media screen and (forced-colors: active) {
@@ -111,8 +96,7 @@ body {
 #viewerContainer {
   overflow: auto;
   position: absolute;
-  inset-block: 41px 0;
-  inset-inline: 0;
+  inset: var(--toolbar-height) 0 0;
   outline: none;
 }
 
@@ -177,63 +161,61 @@ body {
   align-items: center;
   position: absolute;
   width: 100%;
-  height: 40px;
+  height: calc(var(--toolbar-height) + var(--toolbar-border-width));
   top: 0;
   left: 0;
-  box-sizing: content-box;
-  border-block-end: solid 1px var(--toolbar-divider-color);
-  background-color: var(--toolbar-bg-color);
-}
-
-#floatingToolbar.show {
-  z-index: 100000;
-  opacity: 1;
-}
-
-#floatingToolbar:not(show) {
-  z-index: -1;
-  opacity: 0;
-}
-
-.toolbarButton {
-  display: flex;
-  align-items: center;
-  border-style: none;
-  user-select: none;
+  padding: 2px;
   box-sizing: border-box;
-  background-color: transparent;
-  width: auto;
-  height: auto;
-  outline: none;
-  position: relative;
-}
+  border-block-end: solid var(--toolbar-border-width)
+    var(--toolbar-divider-color);
+  background-color: var(--toolbar-bg-color);
 
-.toolbarButton > span {
-  color: var(--toolbar-fg-color);
-  width: auto;
-  height: auto;
-  overflow: hidden;
+  &.show {
+    z-index: 100000;
+    opacity: 1;
+  }
+
+  &:not(.show) {
+    z-index: -1;
+    opacity: 0;
+  }
+
+  .toolbarButton {
+    display: flex;
+    align-items: center;
+    border-style: none;
+    user-select: none;
+    box-sizing: border-box;
+    background-color: transparent;
+    width: auto;
+    height: 100%;
+    outline: none;
+    position: relative;
+
+    &::before {
+      width: 24px;
+      height: 24px;
+      content: "";
+      background-color: var(--toolbar-fg-color);
+      mask-size: cover;
+      margin-inline: 12px 8px;
+    }
+
+    > span {
+      color: var(--toolbar-fg-color);
+      width: auto;
+      height: auto;
+      overflow: hidden;
+    }
+
+    &#download::before {
+      mask-image: var(--toolbarButton-download-icon);
+    }
+  }
 }
 
 :is(.toolbarButton .dialogButton)[disabled] {
   opacity: 0.5;
-}
-
-.toolbarButton::before {
-  width: 24px;
-  height: 24px;
-  content: "";
-  background-color: var(--toolbar-fg-color);
-  mask-size: cover;
-  margin-inline: 12px 8px;
-}
-
-#download::before {
-  mask-image: var(--toolbarButton-download-icon);
-}
-
-#openInApp::before {
-  mask-image: var(--toolbarButton-openinapp-icon);
 }
 
 .dialogButton {
@@ -254,12 +236,12 @@ dialog {
   font-size: 12px;
   line-height: 14px;
   background-color: var(--doorhanger-bg-color);
-  border: 1px solid rgba(0, 0, 0, 0.5);
+  border: 1px solid rgb(0 0 0 / 0.5);
   border-radius: 4px;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.3);
 }
 dialog::backdrop {
-  background-color: rgba(0, 0, 0, 0.2);
+  background-color: rgb(0 0 0 / 0.2);
 }
 
 dialog > .row {
@@ -277,9 +259,10 @@ dialog .toolbarField {
 dialog .separator {
   display: block;
   margin: 4px 0;
-  height: 1px;
+  height: 0;
   width: 100%;
-  background-color: var(--separator-color);
+  border-top: 1px solid var(--separator-color);
+  border-bottom: none;
 }
 
 dialog .buttonRow {
@@ -288,7 +271,7 @@ dialog .buttonRow {
 }
 
 dialog :link {
-  color: rgba(255, 255, 255, 1);
+  color: rgb(255 255 255);
 }
 
 #passwordDialog {
@@ -308,7 +291,7 @@ dialog :link {
 
 @media print {
   body {
-    background: rgba(0, 0, 0, 0) none;
+    background: rgb(0 0 0 / 0) none;
   }
   body[data-pdfjsprinting] #outerContainer {
     display: none;

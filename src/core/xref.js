@@ -44,6 +44,7 @@ class XRef {
     this._pendingRefs = new RefSet();
     this._newPersistentRefNum = null;
     this._newTemporaryRefNum = null;
+    this._persistentRefsCache = null;
   }
 
   getNewPersistentRef(obj) {
@@ -63,6 +64,19 @@ class XRef {
     // stream.
     if (this._newTemporaryRefNum === null) {
       this._newTemporaryRefNum = this.entries.length || 1;
+      if (this._newPersistentRefNum) {
+        this._persistentRefsCache = new Map();
+        for (
+          let i = this._newTemporaryRefNum;
+          i < this._newPersistentRefNum;
+          i++
+        ) {
+          // We *temporarily* clear the cache, see `resetNewTemporaryRef` below,
+          // to avoid any conflict with the refs created during saving.
+          this._persistentRefsCache.set(i, this._cacheMap.get(i));
+          this._cacheMap.delete(i);
+        }
+      }
     }
     return Ref.get(this._newTemporaryRefNum++, 0);
   }
@@ -70,6 +84,12 @@ class XRef {
   resetNewTemporaryRef() {
     // Called once saving is finished.
     this._newTemporaryRefNum = null;
+    if (this._persistentRefsCache) {
+      for (const [num, obj] of this._persistentRefsCache) {
+        this._cacheMap.set(num, obj);
+      }
+    }
+    this._persistentRefsCache = null;
   }
 
   setStartXRef(startXRef) {
@@ -290,18 +310,15 @@ class XRef {
     if (!("streamState" in this)) {
       // Stores state of the stream as we process it so we can resume
       // from middle of stream in case of missing data error
-      const streamParameters = stream.dict;
-      const byteWidths = streamParameters.get("W");
-      let range = streamParameters.get("Index");
-      if (!range) {
-        range = [0, streamParameters.get("Size")];
-      }
+      const { dict, pos } = stream;
+      const byteWidths = dict.get("W");
+      const range = dict.get("Index") || [0, dict.get("Size")];
 
       this.streamState = {
         entryRanges: range,
         byteWidths,
         entryNum: 0,
-        streamPos: stream.pos,
+        streamPos: pos,
       };
     }
     this.readXRefStream(stream);
@@ -660,6 +677,31 @@ class XRef {
     if (this.topDict) {
       return this.topDict;
     }
+
+    // When no trailer dictionary candidate exists, try picking the first
+    // dictionary that contains a /Root entry (fixes issue18986.pdf).
+    if (!trailerDicts.length) {
+      for (const [num, entry] of this.entries.entries()) {
+        if (!entry) {
+          continue;
+        }
+        const ref = Ref.get(num, entry.gen);
+        let obj;
+
+        try {
+          obj = this.fetch(ref);
+        } catch {
+          continue;
+        }
+        if (obj instanceof BaseStream) {
+          obj = obj.dict;
+        }
+        if (obj instanceof Dict && obj.has("Root")) {
+          return obj;
+        }
+      }
+    }
+
     // nothing helps
     throw new InvalidPDFException("Invalid PDF structure.");
   }
@@ -800,7 +842,6 @@ class XRef {
 
     if (xrefEntry === null) {
       // The referenced entry can be free.
-      this._cacheMap.set(num, xrefEntry);
       return xrefEntry;
     }
     // Prevent circular references, in corrupt PDF documents, from hanging the

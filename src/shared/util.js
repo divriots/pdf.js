@@ -25,10 +25,7 @@ const isNodeJS =
   !process.versions.nw &&
   !(process.versions.electron && process.type && process.type !== "browser");
 
-const IDENTITY_MATRIX = [1, 0, 0, 1, 0, 0];
 const FONT_IDENTITY_MATRIX = [0.001, 0, 0, 0.001, 0, 0];
-
-const MAX_IMAGE_SIZE_TO_CACHE = 10e6; // Ten megabytes.
 
 // Represent the percentage of the height of a single-line field over
 // the font size. Acrobat seems to use this value.
@@ -41,10 +38,12 @@ const BASELINE_FACTOR = LINE_DESCENT_FACTOR / LINE_FACTOR;
  * how these flags are being used:
  *  - ANY, DISPLAY, and PRINT are the normal rendering intents, note the
  *    `PDFPageProxy.{render, getOperatorList, getAnnotations}`-methods.
+ *  - SAVE is used, on the worker-thread, when saving modified annotations.
  *  - ANNOTATIONS_FORMS, ANNOTATIONS_STORAGE, ANNOTATIONS_DISABLE control which
  *    annotations are rendered onto the canvas (i.e. by being included in the
  *    operatorList), note the `PDFPageProxy.{render, getOperatorList}`-methods
  *    and their `annotationMode`-option.
+ *  - IS_EDITING is used when editing is active in the viewer.
  *  - OPLIST is used with the `PDFPageProxy.getOperatorList`-method, note the
  *    `OperatorList`-constructor (on the worker-thread).
  */
@@ -56,6 +55,7 @@ const RenderingIntentFlag = {
   ANNOTATIONS_FORMS: 0x10,
   ANNOTATIONS_STORAGE: 0x20,
   ANNOTATIONS_DISABLE: 0x40,
+  IS_EDITING: 0x80,
   OPLIST: 0x100,
 };
 
@@ -72,8 +72,10 @@ const AnnotationEditorType = {
   DISABLE: -1,
   NONE: 0,
   FREETEXT: 3,
+  HIGHLIGHT: 9,
   STAMP: 13,
   INK: 15,
+  SIGNATURE: 101,
 };
 
 const AnnotationEditorParamsType = {
@@ -85,6 +87,12 @@ const AnnotationEditorParamsType = {
   INK_COLOR: 21,
   INK_THICKNESS: 22,
   INK_OPACITY: 23,
+  HIGHLIGHT_COLOR: 31,
+  HIGHLIGHT_DEFAULT_COLOR: 32,
+  HIGHLIGHT_THICKNESS: 33,
+  HIGHLIGHT_FREE: 34,
+  HIGHLIGHT_SHOW_ALL: 35,
+  DRAW_STEP: 41,
 };
 
 // Permission flags from Table 22, Section 7.6.3.2 of the PDF specification.
@@ -231,11 +239,6 @@ const VerbosityLevel = {
   INFOS: 5,
 };
 
-const CMapCompressionType = {
-  NONE: 0,
-  BINARY: 1,
-};
-
 // All the possible operations for an operator list.
 const OPS = {
   // Intentionally start from 1 so it is easy to spot bad operators that will be
@@ -333,7 +336,19 @@ const OPS = {
   paintImageMaskXObjectRepeat: 89,
   paintSolidColorImageMask: 90,
   constructPath: 91,
+  setStrokeTransparent: 92,
+  setFillTransparent: 93,
+  rawFillPath: 94,
   TextContentItem: 100,
+};
+
+// In order to have a switch statement that is fast (i.e. which use a jump
+// table), we need to have the OPS in a contiguous range.
+const DrawOPS = {
+  moveTo: 0,
+  lineTo: 1,
+  curveTo: 2,
+  closePath: 3,
 };
 
 const PasswordResponses = {
@@ -358,6 +373,7 @@ function getVerbosityLevel() {
 // end users.
 function info(msg) {
   if (verbosity >= VerbosityLevel.INFOS) {
+    // eslint-disable-next-line no-console
     console.log(`Info: ${msg}`);
   }
 }
@@ -365,6 +381,7 @@ function info(msg) {
 // Non-fatal warnings.
 function warn(msg) {
   if (verbosity >= VerbosityLevel.WARNINGS) {
+    // eslint-disable-next-line no-console
     console.log(`Warning: ${msg}`);
   }
 }
@@ -405,35 +422,50 @@ function createValidAbsoluteUrl(url, baseUrl = null, options = null) {
   if (!url) {
     return null;
   }
-  try {
-    if (options && typeof url === "string") {
-      // Let URLs beginning with "www." default to using the "http://" protocol.
-      if (options.addDefaultProtocol && url.startsWith("www.")) {
-        const dots = url.match(/\./g);
-        // Avoid accidentally matching a *relative* URL pointing to a file named
-        // e.g. "www.pdf" or similar.
-        if (dots?.length >= 2) {
-          url = `http://${url}`;
-        }
-      }
-
-      // According to ISO 32000-1:2008, section 12.6.4.7, URIs should be encoded
-      // in 7-bit ASCII. Some bad PDFs use UTF-8 encoding; see bug 1122280.
-      if (options.tryConvertEncoding) {
-        try {
-          url = stringToUTF8String(url);
-        } catch {}
+  if (options && typeof url === "string") {
+    // Let URLs beginning with "www." default to using the "http://" protocol.
+    if (options.addDefaultProtocol && url.startsWith("www.")) {
+      const dots = url.match(/\./g);
+      // Avoid accidentally matching a *relative* URL pointing to a file named
+      // e.g. "www.pdf" or similar.
+      if (dots?.length >= 2) {
+        url = `http://${url}`;
       }
     }
 
-    const absoluteUrl = baseUrl ? new URL(url, baseUrl) : new URL(url);
-    if (_isValidProtocol(absoluteUrl)) {
-      return absoluteUrl;
+    // According to ISO 32000-1:2008, section 12.6.4.7, URIs should be encoded
+    // in 7-bit ASCII. Some bad PDFs use UTF-8 encoding; see bug 1122280.
+    if (options.tryConvertEncoding) {
+      try {
+        url = stringToUTF8String(url);
+      } catch {}
     }
-  } catch {
-    /* `new URL()` will throw on incorrect data. */
   }
-  return null;
+
+  const absoluteUrl = baseUrl ? URL.parse(url, baseUrl) : URL.parse(url);
+  return _isValidProtocol(absoluteUrl) ? absoluteUrl : null;
+}
+
+/**
+ * Remove, or replace, the hash property of the URL.
+ *
+ * @param {URL|string} url - The absolute, or relative, URL.
+ * @param {string} hash - The hash property (use an empty string to remove it).
+ * @param {boolean} [allowRel] - Allow relative URLs.
+ * @returns {string} The resulting URL string.
+ */
+function updateUrlHash(url, hash, allowRel = false) {
+  const res = URL.parse(url);
+  if (res) {
+    res.hash = hash;
+    return res.href;
+  }
+  // Support well-formed relative URLs, necessary for `web/app.js` in GENERIC
+  // builds, by optionally falling back to string parsing.
+  if (allowRel && createValidAbsoluteUrl(url, "http://example.com")) {
+    return url.split("#", 1)[0] + `${hash ? `#${hash}` : ""}`;
+  }
+  return "";
 }
 
 function shadow(obj, prop, value, nonSerializable = false) {
@@ -458,7 +490,10 @@ function shadow(obj, prop, value, nonSerializable = false) {
 const BaseException = (function BaseExceptionClosure() {
   // eslint-disable-next-line no-shadow
   function BaseException(message, name) {
-    if (this.constructor === BaseException) {
+    if (
+      (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) &&
+      this.constructor === BaseException
+    ) {
       unreachable("Cannot initialize BaseException.");
     }
     this.message = message;
@@ -490,16 +525,11 @@ class InvalidPDFException extends BaseException {
   }
 }
 
-class MissingPDFException extends BaseException {
-  constructor(msg) {
-    super(msg, "MissingPDFException");
-  }
-}
-
-class UnexpectedResponseException extends BaseException {
-  constructor(msg, status) {
-    super(msg, "UnexpectedResponseException");
+class ResponseException extends BaseException {
+  constructor(msg, status, missing) {
+    super(msg, "ResponseException");
     this.status = status;
+    this.missing = missing;
   }
 }
 
@@ -570,16 +600,6 @@ function objectSize(obj) {
   return Object.keys(obj).length;
 }
 
-// Ensure that the returned Object has a `null` prototype; hence why
-// `Object.fromEntries(...)` is not used.
-function objectFromMap(map) {
-  const obj = Object.create(null);
-  for (const [key, value] of map) {
-    obj[key] = value;
-  }
-  return obj;
-}
-
 // Checks the endianness of the platform.
 function isLittleEndian() {
   const buffer8 = new Uint8Array(4);
@@ -615,16 +635,25 @@ class FeatureTest {
     );
   }
 
+  static get isImageDecoderSupported() {
+    return shadow(
+      this,
+      "isImageDecoderSupported",
+      typeof ImageDecoder !== "undefined"
+    );
+  }
+
   static get platform() {
-    if (
-      (typeof PDFJSDev === "undefined" || PDFJSDev.test("GENERIC")) &&
-      typeof navigator === "undefined"
-    ) {
-      return shadow(this, "platform", { isWin: false, isMac: false });
-    }
+    const { platform, userAgent } = navigator;
+
     return shadow(this, "platform", {
-      isWin: navigator.platform.includes("Win"),
-      isMac: navigator.platform.includes("Mac"),
+      isAndroid: userAgent.includes("Android"),
+      isLinux: platform.includes("Linux"),
+      isMac: platform.includes("Mac"),
+      isWindows: platform.includes("Win"),
+      isFirefox:
+        (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
+        userAgent.includes("Firefox"),
     });
   }
 
@@ -637,7 +666,7 @@ class FeatureTest {
   }
 }
 
-const hexNumbers = [...Array(256).keys()].map(n =>
+const hexNumbers = Array.from(Array(256).keys(), n =>
   n.toString(16).padStart(2, "0")
 );
 
@@ -648,52 +677,52 @@ class Util {
 
   // Apply a scaling matrix to some min/max values.
   // If a scaling factor is negative then min and max must be
-  // swaped.
+  // swapped.
   static scaleMinMax(transform, minMax) {
     let temp;
     if (transform[0]) {
       if (transform[0] < 0) {
         temp = minMax[0];
-        minMax[0] = minMax[1];
-        minMax[1] = temp;
+        minMax[0] = minMax[2];
+        minMax[2] = temp;
       }
       minMax[0] *= transform[0];
-      minMax[1] *= transform[0];
+      minMax[2] *= transform[0];
 
       if (transform[3] < 0) {
-        temp = minMax[2];
-        minMax[2] = minMax[3];
+        temp = minMax[1];
+        minMax[1] = minMax[3];
         minMax[3] = temp;
       }
-      minMax[2] *= transform[3];
+      minMax[1] *= transform[3];
       minMax[3] *= transform[3];
     } else {
       temp = minMax[0];
-      minMax[0] = minMax[2];
-      minMax[2] = temp;
-      temp = minMax[1];
-      minMax[1] = minMax[3];
+      minMax[0] = minMax[1];
+      minMax[1] = temp;
+      temp = minMax[2];
+      minMax[2] = minMax[3];
       minMax[3] = temp;
 
       if (transform[1] < 0) {
-        temp = minMax[2];
-        minMax[2] = minMax[3];
+        temp = minMax[1];
+        minMax[1] = minMax[3];
         minMax[3] = temp;
       }
-      minMax[2] *= transform[1];
+      minMax[1] *= transform[1];
       minMax[3] *= transform[1];
 
       if (transform[2] < 0) {
         temp = minMax[0];
-        minMax[0] = minMax[1];
-        minMax[1] = temp;
+        minMax[0] = minMax[2];
+        minMax[2] = temp;
       }
       minMax[0] *= transform[2];
-      minMax[1] *= transform[2];
+      minMax[2] *= transform[2];
     }
     minMax[0] += transform[4];
-    minMax[1] += transform[4];
-    minMax[2] += transform[5];
+    minMax[1] += transform[5];
+    minMax[2] += transform[4];
     minMax[3] += transform[5];
   }
 
@@ -710,32 +739,79 @@ class Util {
   }
 
   // For 2d affine transforms
-  static applyTransform(p, m) {
-    const xt = p[0] * m[0] + p[1] * m[2] + m[4];
-    const yt = p[0] * m[1] + p[1] * m[3] + m[5];
-    return [xt, yt];
+  static applyTransform(p, m, pos = 0) {
+    const p0 = p[pos];
+    const p1 = p[pos + 1];
+    p[pos] = p0 * m[0] + p1 * m[2] + m[4];
+    p[pos + 1] = p0 * m[1] + p1 * m[3] + m[5];
+  }
+
+  static applyTransformToBezier(p, transform, pos = 0) {
+    const m0 = transform[0];
+    const m1 = transform[1];
+    const m2 = transform[2];
+    const m3 = transform[3];
+    const m4 = transform[4];
+    const m5 = transform[5];
+    for (let i = 0; i < 6; i += 2) {
+      const pI = p[pos + i];
+      const pI1 = p[pos + i + 1];
+      p[pos + i] = pI * m0 + pI1 * m2 + m4;
+      p[pos + i + 1] = pI * m1 + pI1 * m3 + m5;
+    }
   }
 
   static applyInverseTransform(p, m) {
+    const p0 = p[0];
+    const p1 = p[1];
     const d = m[0] * m[3] - m[1] * m[2];
-    const xt = (p[0] * m[3] - p[1] * m[2] + m[2] * m[5] - m[4] * m[3]) / d;
-    const yt = (-p[0] * m[1] + p[1] * m[0] + m[4] * m[1] - m[5] * m[0]) / d;
-    return [xt, yt];
+    p[0] = (p0 * m[3] - p1 * m[2] + m[2] * m[5] - m[4] * m[3]) / d;
+    p[1] = (-p0 * m[1] + p1 * m[0] + m[4] * m[1] - m[5] * m[0]) / d;
   }
 
   // Applies the transform to the rectangle and finds the minimum axially
   // aligned bounding box.
-  static getAxialAlignedBoundingBox(r, m) {
-    const p1 = this.applyTransform(r, m);
-    const p2 = this.applyTransform(r.slice(2, 4), m);
-    const p3 = this.applyTransform([r[0], r[3]], m);
-    const p4 = this.applyTransform([r[2], r[1]], m);
-    return [
-      Math.min(p1[0], p2[0], p3[0], p4[0]),
-      Math.min(p1[1], p2[1], p3[1], p4[1]),
-      Math.max(p1[0], p2[0], p3[0], p4[0]),
-      Math.max(p1[1], p2[1], p3[1], p4[1]),
-    ];
+  static axialAlignedBoundingBox(rect, transform, output) {
+    const m0 = transform[0];
+    const m1 = transform[1];
+    const m2 = transform[2];
+    const m3 = transform[3];
+    const m4 = transform[4];
+    const m5 = transform[5];
+    const r0 = rect[0];
+    const r1 = rect[1];
+    const r2 = rect[2];
+    const r3 = rect[3];
+
+    let a0 = m0 * r0 + m4;
+    let a2 = a0;
+    let a1 = m0 * r2 + m4;
+    let a3 = a1;
+    let b0 = m3 * r1 + m5;
+    let b2 = b0;
+    let b1 = m3 * r3 + m5;
+    let b3 = b1;
+
+    if (m1 !== 0 || m2 !== 0) {
+      // Non-scaling matrix: shouldn't be frequent.
+      const m1r0 = m1 * r0;
+      const m1r2 = m1 * r2;
+      const m2r1 = m2 * r1;
+      const m2r3 = m2 * r3;
+      a0 += m2r1;
+      a3 += m2r1;
+      a1 += m2r3;
+      a2 += m2r3;
+      b0 += m1r0;
+      b3 += m1r0;
+      b1 += m1r2;
+      b2 += m1r2;
+    }
+
+    output[0] = Math.min(output[0], a0, a1, a2, a3);
+    output[1] = Math.min(output[1], b0, b1, b2, b3);
+    output[2] = Math.max(output[2], a0, a1, a2, a3);
+    output[3] = Math.max(output[3], b0, b1, b2, b3);
   }
 
   static inverseTransform(m) {
@@ -753,23 +829,21 @@ class Util {
   // This calculation uses Singular Value Decomposition.
   // The SVD can be represented with formula A = USV. We are interested in the
   // matrix S here because it represents the scale values.
-  static singularValueDecompose2dScale(m) {
-    const transpose = [m[0], m[2], m[1], m[3]];
-
+  static singularValueDecompose2dScale(matrix, output) {
+    const m0 = matrix[0];
+    const m1 = matrix[1];
+    const m2 = matrix[2];
+    const m3 = matrix[3];
     // Multiply matrix m with its transpose.
-    const a = m[0] * transpose[0] + m[1] * transpose[2];
-    const b = m[0] * transpose[1] + m[1] * transpose[3];
-    const c = m[2] * transpose[0] + m[3] * transpose[2];
-    const d = m[2] * transpose[1] + m[3] * transpose[3];
+    const a = m0 ** 2 + m1 ** 2;
+    const b = m0 * m2 + m1 * m3;
+    const c = m2 ** 2 + m3 ** 2;
 
     // Solve the second degree polynomial to get roots.
-    const first = (a + d) / 2;
-    const second = Math.sqrt((a + d) ** 2 - 4 * (a * d - c * b)) / 2;
-    const sx = first + second || 1;
-    const sy = first - second || 1;
-
-    // Scale values are the square roots of the eigenvalues.
-    return [Math.sqrt(sx), Math.sqrt(sy)];
+    const first = (a + c) / 2;
+    const second = Math.sqrt(first ** 2 - (a * c - b ** 2));
+    output[0] = Math.sqrt(first + second || 1);
+    output[1] = Math.sqrt(first - second || 1);
   }
 
   // Normalize rectangle rect=[x1, y1, x2, y2] so that (x1,y1) < (x2,y2)
@@ -819,76 +893,121 @@ class Util {
     return [xLow, yLow, xHigh, yHigh];
   }
 
+  static pointBoundingBox(x, y, minMax) {
+    minMax[0] = Math.min(minMax[0], x);
+    minMax[1] = Math.min(minMax[1], y);
+    minMax[2] = Math.max(minMax[2], x);
+    minMax[3] = Math.max(minMax[3], y);
+  }
+
+  static rectBoundingBox(x0, y0, x1, y1, minMax) {
+    minMax[0] = Math.min(minMax[0], x0, x1);
+    minMax[1] = Math.min(minMax[1], y0, y1);
+    minMax[2] = Math.max(minMax[2], x0, x1);
+    minMax[3] = Math.max(minMax[3], y0, y1);
+  }
+
+  static #getExtremumOnCurve(x0, x1, x2, x3, y0, y1, y2, y3, t, minMax) {
+    if (t <= 0 || t >= 1) {
+      return;
+    }
+    const mt = 1 - t;
+    const tt = t * t;
+    const ttt = tt * t;
+    const x = mt * (mt * (mt * x0 + 3 * t * x1) + 3 * tt * x2) + ttt * x3;
+    const y = mt * (mt * (mt * y0 + 3 * t * y1) + 3 * tt * y2) + ttt * y3;
+    minMax[0] = Math.min(minMax[0], x);
+    minMax[1] = Math.min(minMax[1], y);
+    minMax[2] = Math.max(minMax[2], x);
+    minMax[3] = Math.max(minMax[3], y);
+  }
+
+  static #getExtremum(x0, x1, x2, x3, y0, y1, y2, y3, a, b, c, minMax) {
+    if (Math.abs(a) < 1e-12) {
+      if (Math.abs(b) >= 1e-12) {
+        this.#getExtremumOnCurve(
+          x0,
+          x1,
+          x2,
+          x3,
+          y0,
+          y1,
+          y2,
+          y3,
+          -c / b,
+          minMax
+        );
+      }
+      return;
+    }
+
+    const delta = b ** 2 - 4 * c * a;
+    if (delta < 0) {
+      return;
+    }
+    const sqrtDelta = Math.sqrt(delta);
+    const a2 = 2 * a;
+    this.#getExtremumOnCurve(
+      x0,
+      x1,
+      x2,
+      x3,
+      y0,
+      y1,
+      y2,
+      y3,
+      (-b + sqrtDelta) / a2,
+      minMax
+    );
+    this.#getExtremumOnCurve(
+      x0,
+      x1,
+      x2,
+      x3,
+      y0,
+      y1,
+      y2,
+      y3,
+      (-b - sqrtDelta) / a2,
+      minMax
+    );
+  }
+
   // From https://github.com/adobe-webplatform/Snap.svg/blob/b365287722a72526000ac4bfcf0ce4cac2faa015/src/path.js#L852
-  static bezierBoundingBox(x0, y0, x1, y1, x2, y2, x3, y3) {
-    const tvalues = [],
-      bounds = [[], []];
-    let a, b, c, t, t1, t2, b2ac, sqrtb2ac;
-    for (let i = 0; i < 2; ++i) {
-      if (i === 0) {
-        b = 6 * x0 - 12 * x1 + 6 * x2;
-        a = -3 * x0 + 9 * x1 - 9 * x2 + 3 * x3;
-        c = 3 * x1 - 3 * x0;
-      } else {
-        b = 6 * y0 - 12 * y1 + 6 * y2;
-        a = -3 * y0 + 9 * y1 - 9 * y2 + 3 * y3;
-        c = 3 * y1 - 3 * y0;
-      }
-      if (Math.abs(a) < 1e-12) {
-        if (Math.abs(b) < 1e-12) {
-          continue;
-        }
-        t = -c / b;
-        if (0 < t && t < 1) {
-          tvalues.push(t);
-        }
-        continue;
-      }
-      b2ac = b * b - 4 * c * a;
-      sqrtb2ac = Math.sqrt(b2ac);
-      if (b2ac < 0) {
-        continue;
-      }
-      t1 = (-b + sqrtb2ac) / (2 * a);
-      if (0 < t1 && t1 < 1) {
-        tvalues.push(t1);
-      }
-      t2 = (-b - sqrtb2ac) / (2 * a);
-      if (0 < t2 && t2 < 1) {
-        tvalues.push(t2);
-      }
-    }
+  static bezierBoundingBox(x0, y0, x1, y1, x2, y2, x3, y3, minMax) {
+    minMax[0] = Math.min(minMax[0], x0, x3);
+    minMax[1] = Math.min(minMax[1], y0, y3);
+    minMax[2] = Math.max(minMax[2], x0, x3);
+    minMax[3] = Math.max(minMax[3], y0, y3);
 
-    let j = tvalues.length,
-      mt;
-    const jlen = j;
-    while (j--) {
-      t = tvalues[j];
-      mt = 1 - t;
-      bounds[0][j] =
-        mt * mt * mt * x0 +
-        3 * mt * mt * t * x1 +
-        3 * mt * t * t * x2 +
-        t * t * t * x3;
-      bounds[1][j] =
-        mt * mt * mt * y0 +
-        3 * mt * mt * t * y1 +
-        3 * mt * t * t * y2 +
-        t * t * t * y3;
-    }
-
-    bounds[0][jlen] = x0;
-    bounds[1][jlen] = y0;
-    bounds[0][jlen + 1] = x3;
-    bounds[1][jlen + 1] = y3;
-    bounds[0].length = bounds[1].length = jlen + 2;
-
-    return [
-      Math.min(...bounds[0]),
-      Math.min(...bounds[1]),
-      Math.max(...bounds[0]),
-      Math.max(...bounds[1]),
-    ];
+    this.#getExtremum(
+      x0,
+      x1,
+      x2,
+      x3,
+      y0,
+      y1,
+      y2,
+      y3,
+      3 * (-x0 + 3 * (x1 - x2) + x3),
+      6 * (x0 - 2 * x1 + x2),
+      3 * (x1 - x0),
+      minMax
+    );
+    this.#getExtremum(
+      x0,
+      x1,
+      x2,
+      x3,
+      y0,
+      y1,
+      y2,
+      y3,
+      3 * (-y0 + 3 * (y1 - y2) + y3),
+      6 * (y0 - 2 * y1 + y2),
+      3 * (y1 - y0),
+      minMax
+    );
   }
 }
 
@@ -904,13 +1023,22 @@ const PDFStringTranslateTable = [
   0x131, 0x142, 0x153, 0x161, 0x17e, 0, 0x20ac,
 ];
 
-function stringToPDFString(str) {
+function stringToPDFString(str, keepEscapeSequence = false) {
+  // See section 7.9.2.2 Text String Type.
+  // The string can contain some language codes bracketed with 0x1b,
+  // so we must remove them.
   if (str[0] >= "\xEF") {
     let encoding;
     if (str[0] === "\xFE" && str[1] === "\xFF") {
       encoding = "utf-16be";
+      if (str.length % 2 === 1) {
+        str = str.slice(0, -1);
+      }
     } else if (str[0] === "\xFF" && str[1] === "\xFE") {
       encoding = "utf-16le";
+      if (str.length % 2 === 1) {
+        str = str.slice(0, -1);
+      }
     } else if (str[0] === "\xEF" && str[1] === "\xBB" && str[2] === "\xBF") {
       encoding = "utf-8";
     }
@@ -919,7 +1047,11 @@ function stringToPDFString(str) {
       try {
         const decoder = new TextDecoder(encoding, { fatal: true });
         const buffer = stringToBytes(str);
-        return decoder.decode(buffer);
+        const decoded = decoder.decode(buffer);
+        if (keepEscapeSequence || !decoded.includes("\x1b")) {
+          return decoded;
+        }
+        return decoded.replaceAll(/\x1b[^\x1b]*(?:\x1b|$)/g, "");
       } catch (ex) {
         warn(`stringToPDFString: "${ex}".`);
       }
@@ -928,7 +1060,13 @@ function stringToPDFString(str) {
   // ISO Latin 1
   const strBuf = [];
   for (let i = 0, ii = str.length; i < ii; i++) {
-    const code = PDFStringTranslateTable[str.charCodeAt(i)];
+    const charCode = str.charCodeAt(i);
+    if (!keepEscapeSequence && charCode === 0x1b) {
+      // eslint-disable-next-line no-empty
+      while (++i < ii && str.charCodeAt(i) !== 0x1b) {}
+      continue;
+    }
+    const code = PDFStringTranslateTable[charCode];
     strBuf.push(code ? String.fromCharCode(code) : str.charAt(i));
   }
   return strBuf.join("");
@@ -940,10 +1078,6 @@ function stringToUTF8String(str) {
 
 function utf8StringToString(str) {
   return unescape(encodeURIComponent(str));
-}
-
-function isArrayBuffer(v) {
-  return typeof v === "object" && v?.byteLength !== undefined;
 }
 
 function isArrayEqual(arr1, arr2) {
@@ -971,43 +1105,6 @@ function getModificationDate(date = new Date()) {
   return buffer.join("");
 }
 
-class PromiseCapability {
-  #settled = false;
-
-  constructor() {
-    /**
-     * @type {Promise<any>} The Promise object.
-     */
-    this.promise = new Promise((resolve, reject) => {
-      /**
-       * @type {function} Fulfills the Promise.
-       */
-      this.resolve = data => {
-        this.#settled = true;
-        resolve(data);
-      };
-
-      /**
-       * @type {function} Rejects the Promise.
-       */
-      this.reject = reason => {
-        if (typeof PDFJSDev === "undefined" || PDFJSDev.test("TESTING")) {
-          assert(reason instanceof Error, 'Expected valid "reason" argument.');
-        }
-        this.#settled = true;
-        reject(reason);
-      };
-    });
-  }
-
-  /**
-   * @type {boolean} If the Promise has been fulfilled/rejected.
-   */
-  get settled() {
-    return this.#settled;
-  }
-}
-
 let NormalizeRegex = null;
 let NormalizationMap = null;
 function normalizeUnicode(str) {
@@ -1022,33 +1119,160 @@ function normalizeUnicode(str) {
       /([\u00a0\u00b5\u037e\u0eb3\u2000-\u200a\u202f\u2126\ufb00-\ufb04\ufb06\ufb20-\ufb36\ufb38-\ufb3c\ufb3e\ufb40-\ufb41\ufb43-\ufb44\ufb46-\ufba1\ufba4-\ufba9\ufbae-\ufbb1\ufbd3-\ufbdc\ufbde-\ufbe7\ufbea-\ufbf8\ufbfc-\ufbfd\ufc00-\ufc5d\ufc64-\ufcf1\ufcf5-\ufd3d\ufd88\ufdf4\ufdfa-\ufdfb\ufe71\ufe77\ufe79\ufe7b\ufe7d]+)|(\ufb05+)/gu;
     NormalizationMap = new Map([["ﬅ", "ſt"]]);
   }
-  return str.replaceAll(NormalizeRegex, (_, p1, p2) => {
-    return p1 ? p1.normalize("NFKC") : NormalizationMap.get(p2);
-  });
+  return str.replaceAll(NormalizeRegex, (_, p1, p2) =>
+    p1 ? p1.normalize("NFKC") : NormalizationMap.get(p2)
+  );
 }
 
 function getUuid() {
   if (
     (typeof PDFJSDev !== "undefined" && PDFJSDev.test("MOZCENTRAL")) ||
-    (typeof crypto !== "undefined" && typeof crypto?.randomUUID === "function")
+    typeof crypto.randomUUID === "function"
   ) {
     return crypto.randomUUID();
   }
   const buf = new Uint8Array(32);
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto?.getRandomValues === "function"
-  ) {
-    crypto.getRandomValues(buf);
-  } else {
-    for (let i = 0; i < 32; i++) {
-      buf[i] = Math.floor(Math.random() * 255);
-    }
-  }
+  crypto.getRandomValues(buf);
   return bytesToString(buf);
 }
 
+const AnnotationPrefix = "pdfjs_internal_id_";
+
+function _isValidExplicitDest(validRef, validName, dest) {
+  if (!Array.isArray(dest) || dest.length < 2) {
+    return false;
+  }
+  const [page, zoom, ...args] = dest;
+  if (!validRef(page) && !Number.isInteger(page)) {
+    return false;
+  }
+  if (!validName(zoom)) {
+    return false;
+  }
+  const argsLen = args.length;
+  let allowNull = true;
+  switch (zoom.name) {
+    case "XYZ":
+      if (argsLen < 2 || argsLen > 3) {
+        return false;
+      }
+      break;
+    case "Fit":
+    case "FitB":
+      return argsLen === 0;
+    case "FitH":
+    case "FitBH":
+    case "FitV":
+    case "FitBV":
+      if (argsLen > 1) {
+        return false;
+      }
+      break;
+    case "FitR":
+      if (argsLen !== 4) {
+        return false;
+      }
+      allowNull = false;
+      break;
+    default:
+      return false;
+  }
+  for (const arg of args) {
+    if (typeof arg === "number" || (allowNull && arg === null)) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+// TOOD: Replace all occurrences of this function with `Math.clamp` once
+//       https://github.com/tc39/proposal-math-clamp/ is generally available.
+function MathClamp(v, min, max) {
+  return Math.min(Math.max(v, min), max);
+}
+
+// TODO: Remove this once `Uint8Array.prototype.toHex` is generally available.
+function toHexUtil(arr) {
+  if (Uint8Array.prototype.toHex) {
+    return arr.toHex();
+  }
+  return Array.from(arr, num => hexNumbers[num]).join("");
+}
+
+// TODO: Remove this once `Uint8Array.prototype.toBase64` is generally
+//       available.
+function toBase64Util(arr) {
+  if (Uint8Array.prototype.toBase64) {
+    return arr.toBase64();
+  }
+  return btoa(bytesToString(arr));
+}
+
+// TODO: Remove this once `Uint8Array.fromBase64` is generally available.
+function fromBase64Util(str) {
+  if (Uint8Array.fromBase64) {
+    return Uint8Array.fromBase64(str);
+  }
+  return stringToBytes(atob(str));
+}
+
+// TODO: Remove this once https://bugzilla.mozilla.org/show_bug.cgi?id=1928493
+//       is fixed.
+if (
+  (typeof PDFJSDev === "undefined" || PDFJSDev.test("SKIP_BABEL")) &&
+  typeof Promise.try !== "function"
+) {
+  Promise.try = function (fn, ...args) {
+    return new Promise(resolve => {
+      resolve(fn(...args));
+    });
+  };
+}
+
+// TODO: Remove this once the `javascript.options.experimental.math_sumprecise`
+//       preference is removed from Firefox.
+if (typeof Math.sumPrecise !== "function") {
+  // Note that this isn't a "proper" polyfill, but since we're only using it to
+  // replace `Array.prototype.reduce()` invocations it should be fine.
+  Math.sumPrecise = function (numbers) {
+    return numbers.reduce((a, b) => a + b, 0);
+  };
+}
+
+if (
+  typeof PDFJSDev !== "undefined" &&
+  !PDFJSDev.test("SKIP_BABEL") &&
+  typeof AbortSignal.any !== "function"
+) {
+  AbortSignal.any = function (iterable) {
+    const ac = new AbortController();
+    const { signal } = ac;
+
+    // Return immediately if any of the signals are already aborted.
+    for (const s of iterable) {
+      if (s.aborted) {
+        ac.abort(s.reason);
+        return signal;
+      }
+    }
+    // Register "abort" listeners for all signals.
+    for (const s of iterable) {
+      s.addEventListener(
+        "abort",
+        () => {
+          ac.abort(s.reason);
+        },
+        { signal } // Automatically remove the listener.
+      );
+    }
+
+    return signal;
+  };
+}
+
 export {
+  _isValidExplicitDest,
   AbortException,
   AnnotationActionEventType,
   AnnotationBorderStyleType,
@@ -1058,42 +1282,41 @@ export {
   AnnotationFieldFlag,
   AnnotationFlag,
   AnnotationMode,
+  AnnotationPrefix,
   AnnotationReplyType,
   AnnotationType,
   assert,
   BaseException,
   BASELINE_FACTOR,
   bytesToString,
-  CMapCompressionType,
   createValidAbsoluteUrl,
   DocumentActionEventType,
+  DrawOPS,
   FeatureTest,
   FONT_IDENTITY_MATRIX,
   FormatError,
+  fromBase64Util,
   getModificationDate,
   getUuid,
   getVerbosityLevel,
-  IDENTITY_MATRIX,
+  hexNumbers,
   ImageKind,
   info,
   InvalidPDFException,
-  isArrayBuffer,
   isArrayEqual,
   isNodeJS,
   LINE_DESCENT_FACTOR,
   LINE_FACTOR,
-  MAX_IMAGE_SIZE_TO_CACHE,
-  MissingPDFException,
+  MathClamp,
   normalizeUnicode,
-  objectFromMap,
   objectSize,
   OPS,
   PageActionEventType,
   PasswordException,
   PasswordResponses,
   PermissionFlag,
-  PromiseCapability,
   RenderingIntentFlag,
+  ResponseException,
   setVerbosityLevel,
   shadow,
   string32,
@@ -1101,9 +1324,11 @@ export {
   stringToPDFString,
   stringToUTF8String,
   TextRenderingMode,
-  UnexpectedResponseException,
+  toBase64Util,
+  toHexUtil,
   UnknownErrorException,
   unreachable,
+  updateUrlHash,
   utf8StringToString,
   Util,
   VerbosityLevel,
