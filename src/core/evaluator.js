@@ -2609,10 +2609,8 @@ class PartialEvaluator {
           case OPS.beginText:
             textState.textMatrix = IDENTITY_MATRIX.slice();
             textState.textLineMatrix = IDENTITY_MATRIX.slice();
-            parsingText = true;
             break;
           case OPS.endText:
-            parsingText = false;
             break;
           case OPS.endInlineImage:
             const cacheKey = args[0].cacheKey;
@@ -2806,8 +2804,8 @@ class PartialEvaluator {
             fn = OPS.setStrokeRGBColor;
             break;
           case OPS.setFillRGBColor:
-            stateManager.state.fillColorSpace = ColorSpace.singletons.rgb;
-            args = ColorSpace.singletons.rgb.getRgb(args, 0);
+            stateManager.state.fillColorSpace = ColorSpaceUtils.rgb;
+            args = ColorSpaceUtils.rgb.getRgb(args, 0);
             textState.color = Util.makeHexColor(...args.map(Math.round));
             break;
           case OPS.setStrokeRGBColor:
@@ -3029,6 +3027,23 @@ class PartialEvaluator {
           }
           case OPS.setTextMatrix:
             operatorList.addOp(fn, [new Float32Array(args)]);
+            textState.setTextMatrix(
+              args[0],
+              args[1],
+              args[2],
+              args[3],
+              args[4],
+              args[5]
+            );
+            textState.setTextLineMatrix(
+              args[0],
+              args[1],
+              args[2],
+              args[3],
+              args[4],
+              args[5]
+            );
+            updateAdvanceScale();
             continue;
           case OPS.markPoint:
           case OPS.markPointProps:
@@ -3108,25 +3123,6 @@ class PartialEvaluator {
             break;
           case OPS.nextLine:
             textState.carriageReturn();
-            break;
-          case OPS.setTextMatrix:
-            textState.setTextMatrix(
-              args[0],
-              args[1],
-              args[2],
-              args[3],
-              args[4],
-              args[5]
-            );
-            textState.setTextLineMatrix(
-              args[0],
-              args[1],
-              args[2],
-              args[3],
-              args[4],
-              args[5]
-            );
-            updateAdvanceScale();
             break;
           case OPS.setCharSpacing:
             textState.charSpacing = args[0];
@@ -4055,21 +4051,21 @@ class PartialEvaluator {
             );
             break;
           case OPS.setFillGray:
-            stateManager.state.fillColorSpace = ColorSpace.singletons.gray;
+            stateManager.state.fillColorSpace = ColorSpaceUtils.gray;
             textState.color = Util.makeHexColor(
-              ...ColorSpace.singletons.gray.getRgb(args, 0).map(Math.round)
+              ...ColorSpaceUtils.gray.getRgb(args, 0).map(Math.round)
             );
             break;
           case OPS.setFillCMYKColor:
-            stateManager.state.fillColorSpace = ColorSpace.singletons.cmyk;
+            stateManager.state.fillColorSpace = ColorSpaceUtils.cmyk;
             textState.color = Util.makeHexColor(
-              ...ColorSpace.singletons.cmyk.getRgb(args, 0).map(Math.round)
+              ...ColorSpaceUtils.cmyk.getRgb(args, 0).map(Math.round)
             );
             break;
           case OPS.setFillRGBColor:
-            stateManager.state.fillColorSpace = ColorSpace.singletons.rgb;
+            stateManager.state.fillColorSpace = ColorSpaceUtils.rgb;
             textState.color = Util.makeHexColor(
-              ...ColorSpace.singletons.rgb.getRgb(args, 0).map(Math.round)
+              ...ColorSpaceUtils.rgb.getRgb(args, 0).map(Math.round)
             );
             break;
           case OPS.setFillColorN:
@@ -5802,8 +5798,8 @@ class TextState {
     this.textMatrix = IDENTITY_MATRIX.slice();
     this.textLineMatrix = IDENTITY_MATRIX.slice();
     this.textRenderingMode = TextRenderingMode.FILL;
-    this.fillColorSpace = ColorSpace.singletons.gray;
-    this.strokeColorSpace = ColorSpace.singletons.gray;
+    this.fillColorSpace = ColorSpaceUtils.gray;
+    this.strokeColorSpace = ColorSpaceUtils.gray;
     this.charSpacing = 0;
     this.wordSpacing = 0;
     this.leading = 0;
