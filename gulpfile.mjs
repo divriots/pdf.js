@@ -302,6 +302,12 @@ function createWebpackConfig(
   const licenseHeaderLibre = fs
     .readFileSync("./src/license_header_libre.js")
     .toString();
+  const versionInfoHeader = [
+    "/**",
+    ` * pdfjsVersion = ${versionInfo.version}`,
+    ` * pdfjsBuild = ${versionInfo.commit}`,
+    " */",
+  ].join("\n");
   const enableSourceMaps =
     !bundleDefines.MOZCENTRAL &&
     !bundleDefines.CHROME &&
@@ -335,7 +341,10 @@ function createWebpackConfig(
   const plugins = [];
   if (!disableLicenseHeader) {
     plugins.push(
-      new webpack2.BannerPlugin({ banner: licenseHeaderLibre, raw: true })
+      new webpack2.BannerPlugin({
+        banner: licenseHeaderLibre + "\n" + versionInfoHeader,
+        raw: true,
+      })
     );
   }
   plugins.push({
@@ -389,7 +398,7 @@ function createWebpackConfig(
                   sequences: false,
                 },
                 format: {
-                  comments: /@lic|webpackIgnore|@vite-ignore/i,
+                  comments: /@lic|webpackIgnore|@vite-ignore|pdfjsVersion/i,
                 },
                 keep_classnames: true,
                 keep_fnames: true,
@@ -490,8 +499,7 @@ function checkChromePreferencesFile(chromePrefsPath, webPrefs) {
 
 function createMainBundle(defines) {
   const mainFileConfig = createWebpackConfig(defines, {
-    filename:
-      defines.MINIFIED && !defines.MOZCENTRAL ? "pdf.min.mjs" : "pdf.mjs",
+    filename: defines.MINIFIED ? "pdf.min.mjs" : "pdf.mjs",
     library: {
       type: "module",
     },
@@ -571,10 +579,7 @@ function createSandboxBundle(defines, extraOptions = undefined) {
 
 function createWorkerBundle(defines) {
   const workerFileConfig = createWebpackConfig(defines, {
-    filename:
-      defines.MINIFIED && !defines.MOZCENTRAL
-        ? "pdf.worker.min.mjs"
-        : "pdf.worker.mjs",
+    filename: defines.MINIFIED ? "pdf.worker.min.mjs" : "pdf.worker.mjs",
     library: {
       type: "module",
     },
@@ -1391,7 +1396,7 @@ gulp.task(
   gulp.series(
     createBuildNumber,
     function scriptingMozcentral() {
-      const defines = { ...DEFINES, MOZCENTRAL: true, MINIFIED: true };
+      const defines = { ...DEFINES, MOZCENTRAL: true };
       return buildDefaultPreferences(defines, "mozcentral/");
     },
     async function prefsMozcentral() {
@@ -1400,7 +1405,7 @@ gulp.task(
     function createMozcentral() {
       console.log();
       console.log("### Building mozilla-central extension");
-      const defines = { ...DEFINES, MOZCENTRAL: true, MINIFIED: true };
+      const defines = { ...DEFINES, MOZCENTRAL: true };
       const gvDefines = { ...defines, GECKOVIEW: true };
 
       const MOZCENTRAL_DIR = BUILD_DIR + "mozcentral/",

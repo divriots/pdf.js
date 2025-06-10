@@ -50,7 +50,6 @@ import {
 import {
   build,
   getDocument,
-  isValidExplicitDest,
   PDFDataRangeTransport,
   PDFWorker,
   RenderTask,
@@ -89,20 +88,14 @@ import { DrawLayer } from "./display/draw_layer.js";
 import { GlobalWorkerOptions } from "./display/worker_options.js";
 import { HighlightOutliner } from "./display/editor/drawers/highlight.js";
 import { IDENTITY_MATRIX } from "./core/core_utils.js";
+import { isValidExplicitDest } from "./display/api_utils.js";
 import { SignatureExtractor } from "./display/editor/drawers/signaturedraw.js";
 import { TextLayer } from "./display/text_layer.js";
 import { TouchManager } from "./display/touch_manager.js";
 import { XfaLayer } from "./display/xfa_layer.js";
 
-/* eslint-disable-next-line no-unused-vars */
-const pdfjsVersion =
-  typeof PDFJSDev !== "undefined" ? PDFJSDev.eval("BUNDLE_VERSION") : void 0;
-/* eslint-disable-next-line no-unused-vars */
-const pdfjsBuild =
-  typeof PDFJSDev !== "undefined" ? PDFJSDev.eval("BUNDLE_BUILD") : void 0;
-
 if (typeof PDFJSDev !== "undefined" && PDFJSDev.test("TESTING || GENERIC")) {
-  globalThis.pdfjsTestingUtils = {
+  globalThis._pdfjsTestingUtils = {
     HighlightOutliner,
   };
 }
