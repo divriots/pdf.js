@@ -2175,11 +2175,12 @@ class PartialEvaluator {
 
       for (let i = 0, ii = glyphs.length; i < ii; i++) {
         const glyph = glyphs[i];
-        const { category } = glyph;
+        const { category, unicode: glyphUnicode } = glyph;
 
         if (category.isInvisibleFormatMark) {
           continue;
         }
+        const isSymbol = isPrivateUnicode(glyphUnicode);
         let charSpacing =
           textState.charSpacing + (i + 1 === ii ? extraSpacing : 0);
 
@@ -2209,17 +2210,16 @@ class PartialEvaluator {
           continue;
         }
 
-        if (
-          textContentItem.initialized &&
-          textContentItem.str.length &&
-          textContentItem.color !== textState.color
-        ) {
-          flushTextContentItem();
+        if (textContentItem.initialized && textContentItem.str.length) {
+          if (textContentItem.color !== textState.color || isSymbol) {
+            flushTextContentItem();
+          }
         }
 
         if (
-          !category.isZeroWidthDiacritic &&
-          !compareWithLastPosition(scaledDim)
+          isSymbol ||
+          (!category.isZeroWidthDiacritic &&
+            !compareWithLastPosition(scaledDim))
         ) {
           // The glyph is not in page so just skip it but move the cursor.
           if (!font.vertical) {
@@ -2253,7 +2253,6 @@ class PartialEvaluator {
           textChunk.prevTransform = getCurrentTextTransform();
         }
 
-        const glyphUnicode = glyph.unicode;
         if (saveLastChar(glyphUnicode)) {
           // The two last chars are a non-whitespace followed by a whitespace
           // and then this non-whitespace, so we insert a whitespace here.
@@ -2750,7 +2749,7 @@ class PartialEvaluator {
             cs = stateManager.state.fillColorSpace;
             args = cs.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
-            textState.color = Util.makeHexColor(...args.map(Math.round))
+            textState.color = Util.makeHexColor(...args.map(Math.round));
             break;
           case OPS.setStrokeColor:
             cs = stateManager.state.strokeColorSpace;
@@ -2761,7 +2760,7 @@ class PartialEvaluator {
             stateManager.state.fillColorSpace = ColorSpace.singletons.gray;
             args = ColorSpace.singletons.gray.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
-            textState.color = Util.makeHexColor(...args.map(Math.round))
+            textState.color = Util.makeHexColor(...args.map(Math.round));
             break;
           case OPS.setStrokeGray:
             stateManager.state.strokeColorSpace = ColorSpace.singletons.gray;
@@ -2772,7 +2771,7 @@ class PartialEvaluator {
             stateManager.state.fillColorSpace = ColorSpace.singletons.cmyk;
             args = ColorSpace.singletons.cmyk.getRgb(args, 0);
             fn = OPS.setFillRGBColor;
-            textState.color = Util.makeHexColor(...args.map(Math.round))
+            textState.color = Util.makeHexColor(...args.map(Math.round));
             break;
           case OPS.setStrokeCMYKColor:
             stateManager.state.strokeColorSpace = ColorSpace.singletons.cmyk;
@@ -2782,7 +2781,7 @@ class PartialEvaluator {
           case OPS.setFillRGBColor:
             stateManager.state.fillColorSpace = ColorSpace.singletons.rgb;
             args = ColorSpace.singletons.rgb.getRgb(args, 0);
-            textState.color = Util.makeHexColor(...args.map(Math.round))
+            textState.color = Util.makeHexColor(...args.map(Math.round));
             break;
           case OPS.setStrokeRGBColor:
             stateManager.state.strokeColorSpace = ColorSpace.singletons.rgb;
@@ -3923,26 +3922,26 @@ class PartialEvaluator {
             break;
           case OPS.setFillColor:
             cs = stateManager.state.fillColorSpace;
-            textState.color = Util.makeHexColor(...cs.getRgb(args, 0).map(Math.round))
+            textState.color = Util.makeHexColor(...cs.getRgb(args, 0).map(Math.round));
             break;
           case OPS.setFillGray:
             stateManager.state.fillColorSpace = ColorSpace.singletons.gray;
-            textState.color = Util.makeHexColor(...ColorSpace.singletons.gray.getRgb(args, 0).map(Math.round))
+            textState.color = Util.makeHexColor(...ColorSpace.singletons.gray.getRgb(args, 0).map(Math.round));
             break;
           case OPS.setFillCMYKColor:
             stateManager.state.fillColorSpace = ColorSpace.singletons.cmyk;
-            textState.color = Util.makeHexColor(...ColorSpace.singletons.cmyk.getRgb(args, 0).map(Math.round))
+            textState.color = Util.makeHexColor(...ColorSpace.singletons.cmyk.getRgb(args, 0).map(Math.round));
             break;
           case OPS.setFillRGBColor:
             stateManager.state.fillColorSpace = ColorSpace.singletons.rgb;
-            textState.color = Util.makeHexColor(...ColorSpace.singletons.rgb.getRgb(args, 0).map(Math.round))
+            textState.color = Util.makeHexColor(...ColorSpace.singletons.rgb.getRgb(args, 0).map(Math.round));
             break;
           case OPS.setFillColorN:
             cs = stateManager.state.fillColorSpace;
             if (cs.name === "Pattern") {
               // TODO
             }
-            textState.color = Util.makeHexColor(...cs.getRgb(args, 0).map(Math.round))
+            textState.color = Util.makeHexColor(...cs.getRgb(args, 0).map(Math.round));
             break;
           case OPS.setWordSpacing:
             textState.wordSpacing = args[0];
@@ -5895,6 +5894,16 @@ class EvaluatorPreprocessor {
         break;
     }
   }
+}
+
+function isPrivateUnicode(text = "") {
+  if (!text.trim()) {
+    return false;
+  }
+  // unicode private use areas, usually for icons
+  return /^[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}\s]+$/u.test(
+    text
+  );
 }
 
 export { EvaluatorPreprocessor, PartialEvaluator };
