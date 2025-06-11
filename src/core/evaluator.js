@@ -2774,7 +2774,7 @@ class PartialEvaluator {
             cs = stateManager.state.fillColorSpace;
             args = [cs.getRgbHex(args, 0)];
             fn = OPS.setFillRGBColor;
-            textState.color = Util.makeHexColor(...args.map(Math.round));
+            textState.color = args[0];
             break;
           case OPS.setStrokeColor:
             cs = stateManager.state.strokeColorSpace;
@@ -2785,7 +2785,7 @@ class PartialEvaluator {
             stateManager.state.fillColorSpace = ColorSpaceUtils.gray;
             args = [ColorSpaceUtils.gray.getRgbHex(args, 0)];
             fn = OPS.setFillRGBColor;
-            textState.color = Util.makeHexColor(...args.map(Math.round));
+            textState.color = args[0];
             break;
           case OPS.setStrokeGray:
             stateManager.state.strokeColorSpace = ColorSpaceUtils.gray;
@@ -2796,7 +2796,7 @@ class PartialEvaluator {
             stateManager.state.fillColorSpace = ColorSpaceUtils.cmyk;
             args = [ColorSpaceUtils.cmyk.getRgbHex(args, 0)];
             fn = OPS.setFillRGBColor;
-            textState.color = Util.makeHexColor(...args.map(Math.round));
+            textState.color = args[0];
             break;
           case OPS.setStrokeCMYKColor:
             stateManager.state.strokeColorSpace = ColorSpaceUtils.cmyk;
@@ -2806,7 +2806,7 @@ class PartialEvaluator {
           case OPS.setFillRGBColor:
             stateManager.state.fillColorSpace = ColorSpaceUtils.rgb;
             args = ColorSpaceUtils.rgb.getRgb(args, 0);
-            textState.color = Util.makeHexColor(...args.map(Math.round));
+            textState.color = args[0];
             break;
           case OPS.setStrokeRGBColor:
             stateManager.state.strokeColorSpace = ColorSpaceUtils.rgb;
@@ -2843,7 +2843,7 @@ class PartialEvaluator {
             }
             args = [cs.getRgbHex(args, 0)];
             fn = OPS.setFillRGBColor;
-            textState.color = Util.makeHexColor(...args.map(Math.round));
+            textState.color = args[0];
             break;
           case OPS.setStrokeColorN:
             cs = stateManager.state.patternStrokeColorSpace;
@@ -3180,6 +3180,7 @@ class PartialEvaluator {
         next(deferred);
         return;
       }
+      flushTextContentItem();
       // Some PDFs don't close all restores inside object/form.
       // Closing those for them.
       closePendingRestoreOPS();
@@ -5806,6 +5807,16 @@ class TextState {
     this.textHScale = 1;
     this.textRise = 0;
     this.color = null;
+
+    // Path stuff.
+    this.currentPointX = this.currentPointY = 0;
+    this.pathMinMax = new Float32Array([
+      Infinity,
+      Infinity,
+      -Infinity,
+      -Infinity,
+    ]);
+    this.pathBuffer = [];
   }
 
   setTextMatrix(a, b, c, d, e, f) {
@@ -5845,11 +5856,20 @@ class TextState {
     this.textMatrix = this.textLineMatrix.slice();
   }
 
-  clone() {
+  clone({ newPath = false } = {}) {
     const clone = Object.create(this);
     clone.textMatrix = this.textMatrix.slice();
     clone.textLineMatrix = this.textLineMatrix.slice();
     clone.fontMatrix = this.fontMatrix.slice();
+    if (newPath) {
+      clone.pathBuffer = [];
+      clone.pathMinMax = new Float32Array([
+        Infinity,
+        Infinity,
+        -Infinity,
+        -Infinity,
+      ]);
+    }
     return clone;
   }
 }
