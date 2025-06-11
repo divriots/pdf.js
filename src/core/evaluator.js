@@ -3071,6 +3071,7 @@ class PartialEvaluator {
         next(deferred);
         return;
       }
+      flushTextContentItem();
       // Some PDFs don't close all restores inside object/form.
       // Closing those for them.
       closePendingRestoreOPS();
