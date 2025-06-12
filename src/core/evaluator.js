@@ -1060,6 +1060,28 @@ class PartialEvaluator {
           this.handler,
           this.options
         );
+      } else {
+        const privateSymbolsOrCap = glyphs.filter(glyph => {
+          if (isPrivateUnicode(glyph.unicode)) {
+            return true;
+          }
+          if (!font.$capHeightGlyph) {
+            if (/[A-Z0-9]/.test(glyph.unicode)) {
+              font.$capHeightGlyph = glyph;
+              return true;
+            }
+          }
+          return false;
+        });
+
+        if (privateSymbolsOrCap.length > 0) {
+          PartialEvaluator.buildFontPaths(
+            font,
+            privateSymbolsOrCap,
+            this.handler,
+            this.options
+          );
+        }
       }
     }
     return glyphs;
