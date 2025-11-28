@@ -3326,7 +3326,7 @@ gulp.task(
 function packageJson() {
   const VERSION = getVersionJSON().version;
 
-  const DIST_NAME = "pdfjs-dist";
+  const DIST_NAME = "@divriots/pdfjs-dist";
   const DIST_DESCRIPTION = "Generic build of Mozilla's PDF.js library.";
   const DIST_KEYWORDS = ["Mozilla", "pdf", "pdf.js"];
   const DIST_HOMEPAGE = "https://mozilla.github.io/pdf.js/";
