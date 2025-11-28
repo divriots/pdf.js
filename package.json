@@ -1,5 +1,5 @@
 {
-  "name": "pdf.js",
+  "name": "@divriots/pdf.js",
   "type": "module",
   "devDependencies": {
     "@babel/core": "^7.29.0",

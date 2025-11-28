@@ -441,7 +441,7 @@ class FontFaceObject {
       // Remove the raw path-string, since we don't need it anymore.
       objs.delete(objId);
     }
-    return (this.compiledGlyphs[character] = path);
+    return (this.compiledGlyphs[character] = {path, cmds});
   }
 
   get black() {

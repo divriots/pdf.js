@@ -567,6 +567,7 @@ class Page {
         task,
         resources,
         operatorList: opList,
+        viewBox: this.view,
       });
       return opList;
     });
