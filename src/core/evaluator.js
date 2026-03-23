@@ -1103,10 +1103,8 @@ class PartialEvaluator {
           this.options
         );
       } else {
-        const privateSymbolsOrCap = glyphs.filter(glyph => {
-          if (isPrivateUnicode(glyph.unicode)) {
-            return true;
-          }
+        const hasPrivateSymbol = glyphs.some(glyph => isPrivateUnicode(glyph.unicode));
+        const privateSymbolsOrCap = hasPrivateSymbol ? glyphs : glyphs.filter(glyph => {
           if (!font.$capHeightGlyph) {
             if (/[A-Z0-9]/.test(glyph.unicode)) {
               font.$capHeightGlyph = glyph;
@@ -2243,6 +2241,7 @@ class PartialEvaluator {
 
       const glyphs = font.charsToGlyphs(chars);
       const scale = textState.fontMatrix[0] * textState.fontSize;
+      const isSymbol = glyphs.some(glyph => isPrivateUnicode(glyph.unicode));
 
       for (let i = 0, ii = glyphs.length; i < ii; i++) {
         const glyph = glyphs[i];
@@ -2251,7 +2250,6 @@ class PartialEvaluator {
         if (category.isInvisibleFormatMark) {
           continue;
         }
-        const isSymbol = isPrivateUnicode(glyphUnicode);
         let charSpacing =
           textState.charSpacing + (i + 1 === ii ? extraSpacing : 0);
 
@@ -6451,7 +6449,7 @@ function isPrivateUnicode(text = "") {
     return false;
   }
   // unicode private use areas, usually for icons
-  return /^[\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}\s]+$/u.test(
+  return /^[\u0000-\u001F\u007F-\u009F\uE000-\uF8FF\u{F0000}-\u{FFFFD}\u{100000}-\u{10FFFD}\s]+$/u.test(
     text
   );
 }
