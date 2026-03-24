@@ -2863,6 +2863,10 @@ class PartialEvaluator {
                   seenRefs
                 )
               );
+              const len = operatorList.length;
+              if (operatorList.fnArray[len-1] === OPS.setFillColorN) {
+                textState.color = operatorList.argsArray[len-1];
+              }
               return;
             }
             if (!isNumberArray(args, null)) {
@@ -3892,7 +3896,7 @@ class PartialEvaluator {
         if (
           textContentItem.initialized &&
           textContentItem.str.length &&
-          textContentItem.color !== textState.color
+          !isSameStringOrArrayDeep(textContentItem.color, textState.color)
         ) {
           flushTextContentItem();
         }
@@ -4196,7 +4200,7 @@ class PartialEvaluator {
             );
             break;
           case OPS.setFillColorN:
-            cs = stateManager.state.fillColorSpace;
+            cs = stateManager.state.patternFillColorSpace;
             if (cs.name === "Pattern") {
               // TODO
             }
@@ -6454,3 +6458,23 @@ function isPrivateUnicode(text = "") {
   );
 }
 
+function isSameStringOrArrayDeep(a, b) {
+  if (a === b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+  if (typeof a === "string" || typeof b === "string") {
+    return false;
+  }
+  if (a.length !== b.length) {
+    return false;
+  }
+  for (let i = 0, ii = a.length; i < ii; i++) {
+    if (!isSameStringOrArrayDeep(a[i], b[i])) {
+      return false;
+    }
+  }
+  return true;
+}
