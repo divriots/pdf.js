@@ -1186,7 +1186,7 @@ class PDFDocumentProxy {
  * @property {number} height - Height in device space.
  * @property {string} fontName - Font name used by PDF.js for converted font.
  * @property {boolean} hasEOL - Indicating if the text content is followed by a
- * @property {string} color - Text fill color.
+ * @property {string | Array<any>} color - Text fill color.
  *   line-break.
  */
 
