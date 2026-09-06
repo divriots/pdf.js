@@ -13971,5 +13971,12 @@
     "md5": "ead167e0328f1a1f4f8901cee501a9c4",
     "rounds": 1,
     "type": "eq"
+  },
+  {
+    "id": "devicen-none-zero-domain",
+    "file": "pdfs/devicen-none-zero-domain.pdf",
+    "md5": "65f0b4ca54f82d440e579638ab8abc96",
+    "rounds": 1,
+    "type": "eq"
   }
 ]
