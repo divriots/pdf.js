@@ -232,10 +232,19 @@ function amendFallbackToUnicode(properties) {
   }
   const toUnicode = [];
   for (const charCode in properties.fallbackToUnicode) {
-    if (properties.toUnicode.has(charCode)) {
+    const fallback = properties.fallbackToUnicode[charCode];
+    const included = properties.toUnicode.get(charCode);
+    // Some subsetters map an uppercase code to the lowercase character (Faro:
+    // C/E/I/N/S/T/Y, so "Storage" reads "storage"). The encoding names the
+    // glyph actually drawn, so prefer it when the two differ only in case.
+    const casedOnly =
+      typeof included === "string" &&
+      included !== fallback &&
+      included.toLowerCase() === fallback.toLowerCase();
+    if (included !== undefined && !casedOnly) {
       continue; // The font dictionary has a `ToUnicode` entry.
     }
-    toUnicode[charCode] = properties.fallbackToUnicode[charCode];
+    toUnicode[charCode] = fallback;
   }
   if (toUnicode.length > 0) {
     properties.toUnicode.amend(toUnicode);
