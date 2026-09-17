@@ -12,6 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/* globals process */
 
 import {
   DataType,
@@ -24,7 +25,7 @@ import {
   qcms_drop_transformer,
   qcms_transformer_from_memory,
 } from "../../external/qcms/qcms.js";
-import { shadow, Util, warn } from "../shared/util.js";
+import { isNodeJS, shadow, Util, warn } from "../shared/util.js";
 import { ColorSpace } from "./colorspace.js";
 import { QCMS } from "../../external/qcms/qcms_utils.js";
 
@@ -32,6 +33,16 @@ function fetchSync(url) {
   // Parsing and using color spaces is still synchronous,
   // so we must load the wasm module synchronously.
   // TODO: Make the color space stuff asynchronous and use fetch.
+  if (isNodeJS) {
+    // Node.js has no XMLHttpRequest, so ICC color management was always
+    // unavailable there and `ICCBased` spaces silently fell back to their
+    // `/Alternate`. The wasm and ICC files are local paths in this case.
+    const data = process.getBuiltinModule("fs").readFileSync(url);
+    return data.buffer.slice(
+      data.byteOffset,
+      data.byteOffset + data.byteLength
+    );
+  }
   const xhr = new XMLHttpRequest();
   xhr.open("GET", url, false);
   xhr.responseType = "arraybuffer";
