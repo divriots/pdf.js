@@ -12,11 +12,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/* globals process */
 
 import {
   AnnotationEditorPrefix,
   assert,
   BaseException,
+  isNodeJS,
   makeArr,
   Util,
   warn,
@@ -122,6 +124,12 @@ function arrayBuffersToBytes(arr) {
 }
 
 async function fetchBinaryData(url) {
+  if (isNodeJS && !/^https?:/.test(url)) {
+    // Node.js's fetch() can't read local paths, so the wasm decoders (JBIG2,
+    // OpenJPEG) never loaded there. Like `fetchSync`, read them from disk.
+    const data = await process.getBuiltinModule("fs").promises.readFile(url);
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(
