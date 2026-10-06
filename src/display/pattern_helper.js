@@ -376,7 +376,9 @@ function drawTriangle(data, context, p1, p2, p3, c1, c2, c3) {
     const x2_ = Math.round(Math.max(xa, xb));
     let j = rowSize * y + x1_ * 4;
     for (let x = x1_; x <= x2_; x++) {
-      k = (xa - x) / (xa - xb);
+      // A one-point span (xa === xb) would make k NaN, and `NaN | 0` paints
+      // an opaque black pixel.
+      k = xa === xb ? 0 : (xa - x) / (xa - xb);
       if (k < 0) {
         k = 0;
       } else if (k > 1) {
