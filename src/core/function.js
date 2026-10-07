@@ -162,7 +162,10 @@ class PDFFunction {
     }
     // See chapter 3, page 109 of the PDF reference
     function interpolate(x, xmin, xmax, ymin, ymax) {
-      return ymin + (x - xmin) * ((ymax - ymin) / (xmax - xmin));
+      // A degenerate `Domain` entry, e.g. `[0 0]`, occurs in real-world PDFs.
+      return xmin === xmax
+        ? ymin
+        : ymin + (x - xmin) * ((ymax - ymin) / (xmax - xmin));
     }
 
     let domain = toNumberArray(dict.getArray("Domain"));
