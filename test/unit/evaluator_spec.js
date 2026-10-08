@@ -563,6 +563,7 @@ describe("evaluator", function () {
           [4, "a.sc"],
           [5, "c12.alt"],
           [6, "uniD83DDE00"],
+          [7, "uniD800.init"],
         ]),
       });
       expect(toUnicode.get(1)).toEqual(String.fromCharCode(0x0643));
@@ -571,6 +572,7 @@ describe("evaluator", function () {
       expect(toUnicode.get(4)).toEqual("a");
       expect(toUnicode.has(5)).toEqual(false);
       expect(toUnicode.has(6)).toEqual(false);
+      expect(toUnicode.has(7)).toEqual(false);
     });
   });
 });
