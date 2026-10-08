@@ -29,7 +29,9 @@ import {
   AnnotationMode,
   AnnotationType,
   createValidAbsoluteUrl,
+  DrawOPS,
   FeatureTest,
+  FONT_IDENTITY_MATRIX,
   getUuid,
   ImageKind,
   InvalidPDFException,
@@ -44,6 +46,8 @@ import {
   PermissionFlag,
   ResponseException,
   shadow,
+  TextRenderingMode,
+  unreachable,
   updateUrlHash,
   Util,
   VerbosityLevel,
@@ -53,6 +57,8 @@ import {
   CSSConstants,
   fetchData,
   findContrastColor,
+  getCurrentTransform,
+  getCurrentTransformInverse,
   getFilenameFromUrl,
   getPdfFilenameFromUrl,
   getRGB,
@@ -74,16 +80,24 @@ import {
   getDocument,
   PDFDataRangeTransport,
   PDFWorker,
+  RenderTask,
   version,
 } from "./display/api.js";
+import {
+  getShadingPattern,
+  PathType,
+  TilingPattern,
+} from "./display/pattern_helper.js";
 import { AnnotationEditorLayer } from "./display/editor/annotation_editor_layer.js";
 import { AnnotationEditorUIManager } from "./display/editor/tools.js";
 import { AnnotationLayer } from "./display/annotation_layer.js";
 import { ColorPicker } from "./display/editor/color_picker.js";
+import { convertBlackAndWhiteToRGBA } from "./shared/image_utils.js";
 import { DOMSVGFactory } from "./display/svg_factory.js";
 import { DrawLayer } from "./display/draw_layer.js";
 import { GlobalWorkerOptions } from "./display/worker_options.js";
 import { HighlightOutliner } from "./display/editor/drawers/highlight.js";
+import { IDENTITY_MATRIX } from "./core/core_utils.js";
 import { isValidExplicitDest } from "./display/api_utils.js";
 import { MathClamp } from "./shared/math_clamp.js";
 import { SignatureExtractor } from "./display/editor/drawers/signaturedraw.js";
@@ -114,6 +128,7 @@ globalThis.pdfjsLib = {
   CSSConstants,
   DOMSVGFactory,
   DrawLayer,
+  DrawOPS,
   FeatureTest,
   fetchData,
   findContrastColor,
@@ -175,20 +190,27 @@ export {
   applyOpacity,
   build,
   ColorPicker,
+  convertBlackAndWhiteToRGBA,
   createValidAbsoluteUrl,
   CSSConstants,
   DOMSVGFactory,
   DrawLayer,
+  DrawOPS,
   FeatureTest,
   fetchData,
   findContrastColor,
+  FONT_IDENTITY_MATRIX,
+  getCurrentTransform,
+  getCurrentTransformInverse,
   getDocument,
   getFilenameFromUrl,
   getPdfFilenameFromUrl,
   getRGB,
   getRGBA,
+  getShadingPattern,
   getUuid,
   GlobalWorkerOptions,
+  IDENTITY_MATRIX,
   ImageKind,
   InvalidPDFException,
   isDataScheme,
@@ -205,6 +227,7 @@ export {
   OutputScale,
   PasswordException,
   PasswordResponses,
+  PathType,
   PDFDataRangeTransport,
   PDFDateString,
   PDFWorker,
@@ -212,6 +235,7 @@ export {
   PixelsPerInch,
   RenderingCancelledException,
   renderRichText,
+  RenderTask,
   ResponseException,
   setLayerDimensions,
   shadow,
@@ -220,7 +244,10 @@ export {
   SupportedImageMimeTypes,
   TextLayer,
   TextLayerImages,
+  TextRenderingMode,
+  TilingPattern,
   TouchManager,
+  unreachable,
   updateUrlHash,
   Util,
   VerbosityLevel,

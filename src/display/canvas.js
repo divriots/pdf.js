@@ -2606,7 +2606,7 @@ class CanvasGraphics {
         patternStroke) &&
       !font.missingFile
     ) {
-      path = font.getPathGenerator(this.commonObjs, character);
+      path = font.getPathGenerator(this.commonObjs, character)?.path;
     }
 
     if (path && (font.disableFontFace || patternFill || patternStroke)) {
@@ -2732,6 +2732,10 @@ class CanvasGraphics {
       }
     }
     return shadow(this, "isFontSubpixelAAEnabled", enabled);
+  }
+
+  TextContentItem() {
+    // not needed
   }
 
   showText(opIdx, glyphs) {

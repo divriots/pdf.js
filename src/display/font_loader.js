@@ -478,9 +478,9 @@ class FontFaceObject {
   }
 
   getPathGenerator(objs, character) {
-    let path = this.#compiledPaths.get(character);
-    if (path) {
-      return path;
+    const compiled = this.#compiledPaths.get(character);
+    if (compiled) {
+      return compiled;
     }
 
     const objId = `${this.loadedName}_path_${character}`;
@@ -490,14 +490,15 @@ class FontFaceObject {
     } catch (ex) {
       warn(`getPathGenerator - ignoring character: "${ex}".`);
     }
-    path = makePathFromDrawOPS(cmds?.path);
+    const path = makePathFromDrawOPS(cmds?.path);
 
     if (!this.fontExtraProperties) {
       // Remove the raw path-data, since we don't need it anymore.
       objs.delete(objId);
     }
-    this.#compiledPaths.set(character, path);
-    return path;
+    const glyph = { path, cmds };
+    this.#compiledPaths.set(character, glyph);
+    return glyph;
   }
 
   get black() {

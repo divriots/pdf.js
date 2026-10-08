@@ -38,6 +38,10 @@ class ToUnicodeMap {
     return this.#map.has(i);
   }
 
+  keys() {
+    return this.#map.keys();
+  }
+
   get(i) {
     return this.#map.get(i);
   }

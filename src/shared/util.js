@@ -364,6 +364,7 @@ const OPS = {
   setStrokeTransparent: 92,
   setFillTransparent: 93,
   rawFillPath: 94,
+  TextContentItem: 100,
 };
 
 // In order to have a switch statement that is fast (i.e. which use a jump

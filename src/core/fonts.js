@@ -229,7 +229,15 @@ function amendFallbackToUnicode(properties) {
   }
   const toUnicode = new Map();
   for (const [charCode, entry] of properties.fallbackToUnicode) {
-    if (properties.toUnicode.has(charCode)) {
+    const included = properties.toUnicode.get(charCode);
+    // Some subsetters map an uppercase code to the lowercase character (Faro:
+    // C/E/I/N/S/T/Y, so "Storage" reads "storage"). The encoding names the
+    // glyph actually drawn, so prefer it when the two differ only in case.
+    const casedOnly =
+      typeof included === "string" &&
+      included !== entry &&
+      included.toLowerCase() === entry.toLowerCase();
+    if (included !== undefined && !casedOnly) {
       continue; // The font dictionary has a `ToUnicode` entry.
     }
     toUnicode.set(charCode, entry);
@@ -1228,12 +1236,22 @@ class Font {
   }
 
   exportData() {
+    const extra = this.fontExtraProperties
+      ? this.#getExportData(EXPORT_DATA_EXTRA_PROPERTIES)
+      : undefined;
+    if (extra && this.toUnicode instanceof ToUnicodeMap) {
+      // ToUnicodeMap keeps its entries private, so they would not survive
+      // postMessage: send them as the sparse `_map` array they used to be.
+      const map = [];
+      for (const charCode of this.toUnicode.keys()) {
+        map[charCode] = this.toUnicode.get(charCode);
+      }
+      extra.toUnicode = { _map: map };
+    }
     return {
       buffer: compileFontInfo(this.#getExportData(EXPORT_DATA_PROPERTIES)),
       charProcOperatorList: this.charProcOperatorList,
-      extra: this.fontExtraProperties
-        ? this.#getExportData(EXPORT_DATA_EXTRA_PROPERTIES)
-        : undefined,
+      extra,
     };
   }
 
