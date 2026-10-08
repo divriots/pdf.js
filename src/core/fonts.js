@@ -1236,12 +1236,22 @@ class Font {
   }
 
   exportData() {
+    const extra = this.fontExtraProperties
+      ? this.#getExportData(EXPORT_DATA_EXTRA_PROPERTIES)
+      : undefined;
+    if (extra && this.toUnicode instanceof ToUnicodeMap) {
+      // ToUnicodeMap keeps its entries private, so they would not survive
+      // postMessage: send them as the sparse `_map` array they used to be.
+      const map = [];
+      for (const charCode of this.toUnicode.keys()) {
+        map[charCode] = this.toUnicode.get(charCode);
+      }
+      extra.toUnicode = { _map: map };
+    }
     return {
       buffer: compileFontInfo(this.#getExportData(EXPORT_DATA_PROPERTIES)),
       charProcOperatorList: this.charProcOperatorList,
-      extra: this.fontExtraProperties
-        ? this.#getExportData(EXPORT_DATA_EXTRA_PROPERTIES)
-        : undefined,
+      extra,
     };
   }
 
