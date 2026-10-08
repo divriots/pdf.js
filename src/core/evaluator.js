@@ -890,7 +890,9 @@ class PartialEvaluator {
     }
   }
 
-  #createTransferMap(fn) {
+  // Not `#private`: `clone()` evaluators (Type3 glyphs) are `Object.create`d
+  // and do not carry private methods, so an SMask /TR there threw.
+  _createTransferMap(fn) {
     const transferFn = this._pdfFunctionFactory.create(fn),
       tmp = new Float32Array(1);
     return Uint8Array.from({ length: 256 }, (_, i) => {
@@ -919,7 +921,7 @@ class PartialEvaluator {
     // we will build a map of integer values in range 0..255 to be fast.
     const transferObj = smask.get("TR");
     if (isPDFFunction(transferObj)) {
-      smaskOptions.transferMap = this.#createTransferMap(transferObj);
+      smaskOptions.transferMap = this._createTransferMap(transferObj);
     }
 
     return this.buildFormXObject(
@@ -959,7 +961,7 @@ class PartialEvaluator {
       } else if (!isPDFFunction(transferObj)) {
         return null; // Not a valid transfer function object.
       }
-      transferMaps.push(this.#createTransferMap(transferObj));
+      transferMaps.push(this._createTransferMap(transferObj));
       numEffectfulFns++;
     }
 
