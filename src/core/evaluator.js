@@ -4765,6 +4765,16 @@ class PartialEvaluator {
       if (glyphName === "") {
         continue;
       }
+      // Drop a variant suffix, as the AGL specification does, e.g.
+      // 'uni0643.init' -> 'uni0643' or 'a.sc' -> 'a'; not for the
+      // C/G/g heuristics below ('c12.alt' must not become U+000C).
+      const dot = glyphName.indexOf(".");
+      if (dot > 0) {
+        const base = glyphName.substring(0, dot);
+        if (base[0] === "u" || glyphsUnicodeMap[base] !== undefined) {
+          glyphName = base;
+        }
+      }
       // b) Look up the character name in the Adobe Glyph List (see the
       //    Bibliography) to obtain the corresponding Unicode value.
       let unicode = glyphsUnicodeMap[glyphName];
@@ -4812,6 +4822,18 @@ class PartialEvaluator {
           }
           break;
         case "u": // 'uniXXXX'/'uXXXX{XX}' glyphs
+          // 'uniXXXXYYYY...' ligatures, e.g. 'uni06440627' (lam-alef).
+          if (/^uni(?:[0-9A-F]{4}){2,}$/.test(glyphName)) {
+            const codes = glyphName
+              .substring(3)
+              .match(/.{4}/g)
+              .map(hex => parseInt(hex, 16));
+            // The AGL excludes NUL and surrogates.
+            if (codes.every(c => c > 0 && (c < 0xd800 || c > 0xdfff))) {
+              toUnicode.set(+charcode, String.fromCharCode(...codes));
+            }
+            continue;
+          }
           unicode = getUnicodeForGlyph(glyphName, glyphsUnicodeMap);
           if (unicode !== -1) {
             code = unicode;
