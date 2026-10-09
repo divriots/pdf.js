@@ -233,10 +233,15 @@ function amendFallbackToUnicode(properties) {
     // Some subsetters map an uppercase code to the lowercase character (Faro:
     // C/E/I/N/S/T/Y, so "Storage" reads "storage"). The encoding names the
     // glyph actually drawn, so prefer it when the two differ only in case.
+    // Not for a suffixed name: small caps 'h.sc' may be a typed "H".
+    const diff = properties.differences.get(+charCode);
+    const glyphName =
+      diff && diff !== ".notdef" ? diff : properties.defaultEncoding[charCode];
     const casedOnly =
       typeof included === "string" &&
       included !== entry &&
-      included.toLowerCase() === entry.toLowerCase();
+      included.toLowerCase() === entry.toLowerCase() &&
+      !glyphName?.includes(".");
     if (included !== undefined && !casedOnly) {
       continue; // The font dictionary has a `ToUnicode` entry.
     }
@@ -3803,4 +3808,4 @@ class ErrorFont {
   }
 }
 
-export { ErrorFont, Font };
+export { amendFallbackToUnicode, ErrorFont, Font };

@@ -551,4 +551,28 @@ describe("evaluator", function () {
       expect(lwEntry[1]).toEqual(5);
     });
   });
+
+  describe("simple font toUnicode", function () {
+    it("should map suffixed and ligature glyph names", function () {
+      const toUnicode = partialEvaluator._simpleFontToUnicode({
+        defaultEncoding: [],
+        differences: new Map([
+          [1, "uni0643.init"],
+          [2, "uni06440627.isol"],
+          [3, "one.oldstyle"],
+          [4, "a.sc"],
+          [5, "c12.alt"],
+          [6, "uniD83DDE00"],
+          [7, "uniD800.init"],
+        ]),
+      });
+      expect(toUnicode.get(1)).toEqual(String.fromCharCode(0x0643));
+      expect(toUnicode.get(2)).toEqual(String.fromCharCode(0x0644, 0x0627));
+      expect(toUnicode.get(3)).toEqual("1");
+      expect(toUnicode.get(4)).toEqual("a");
+      expect(toUnicode.has(5)).toEqual(false);
+      expect(toUnicode.has(6)).toEqual(false);
+      expect(toUnicode.has(7)).toEqual(false);
+    });
+  });
 });
