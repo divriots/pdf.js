@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { warn } from "../shared/util.js";
+import { normalizeUnicode, warn } from "../shared/util.js";
 
 // Implements a subset of the Unicode Bidirectional Algorithm (UBA).
 // Specification: https://www.unicode.org/reports/tr9/tr9-48.html
@@ -451,4 +451,38 @@ function bidi(str, startLevel = -1, vertical = false) {
   return createBidiText(chars.join(""), isLTR);
 }
 
-export { bidi };
+// The R and AL code points of bidi() above.
+function isRtl(charCode) {
+  if (0x0600 <= charCode && charCode <= 0x06ff) {
+    return arabicTypes[charCode & 0xff] === "AL";
+  }
+  return (
+    (0x0590 <= charCode && charCode <= 0x05f4) ||
+    (0x0700 <= charCode && charCode <= 0x08ac) ||
+    (0xfb50 <= charCode && charCode <= 0xfdff) ||
+    (0xfe70 <= charCode && charCode <= 0xfeff)
+  );
+}
+
+// bidi() reverses RTL runs char by char: an RTL glyph that stands for several
+// chars (lam-alef) goes in reversed to come out in logical order. `normalize`
+// applies the NFKC its callers run on the whole text (U+FC00 is two chars).
+// Only all-R/AL glyphs: bidi() would split one mixing in marks or ZWNJ, and it
+// leaves vertical text as is.
+function reverseIfRtl(str, normalize, vertical) {
+  const first = str ? str.charCodeAt(0) : 0;
+  // Hebrew presentation forms are L for bidi() but NFKC to R chars.
+  const hebrewForm = normalize && first >= 0xfb1d && first <= 0xfb4f;
+  if (vertical || !(isRtl(first) || hebrewForm)) {
+    return str;
+  }
+  if (normalize) {
+    str = normalizeUnicode(str);
+  }
+  const cps = [...str];
+  return cps.length > 1 && cps.every(c => isRtl(c.charCodeAt(0)))
+    ? cps.reverse().join("")
+    : str;
+}
+
+export { bidi, reverseIfRtl };

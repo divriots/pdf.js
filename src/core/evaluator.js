@@ -30,6 +30,7 @@ import {
   Util,
   warn,
 } from "../shared/util.js";
+import { bidi, reverseIfRtl } from "./bidi.js";
 import { CheckedOperatorList, OperatorList } from "./operator_list.js";
 import { CMapFactory, IdentityCMap } from "./cmap.js";
 import { Cmd, Dict, EOF, isName, Name, Ref, RefSet } from "./primitives.js";
@@ -76,7 +77,6 @@ import {
 } from "./image_utils.js";
 import { parseMarkedContentProps, textSinkWrapper } from "./evaluator_utils.js";
 import { BaseStream } from "./base_stream.js";
-import { bidi } from "./bidi.js";
 import { ColorSpace } from "./colorspace.js";
 import { ColorSpaceUtils } from "./colorspace_utils.js";
 import { compilePatternInfo } from "./obj_bin_transform_core.js";
@@ -2332,7 +2332,9 @@ class PartialEvaluator {
           // contains e.g. tabs (fixes issue6612.pdf).
           textChunk.str.push(" ");
         }
-        textChunk.str.push(glyphUnicode);
+        textChunk.str.push(
+          reverseIfRtl(glyphUnicode, !disableNormalization, textChunk.vertical)
+        );
 
         if (charSpacing) {
           if (!font.vertical) {
@@ -3964,7 +3966,13 @@ class PartialEvaluator {
         }
 
         if (!intersector) {
-          textChunk.str.push(glyphUnicode);
+          textChunk.str.push(
+            reverseIfRtl(
+              glyphUnicode,
+              !disableNormalization,
+              textChunk.vertical
+            )
+          );
         }
 
         if (charSpacing) {
