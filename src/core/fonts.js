@@ -3808,4 +3808,4 @@ class ErrorFont {
   }
 }
 
-export { ErrorFont, Font };
+export { amendFallbackToUnicode, ErrorFont, Font };

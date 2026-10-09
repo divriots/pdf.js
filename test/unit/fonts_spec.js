@@ -13,9 +13,12 @@
  * limitations under the License.
  */
 
-import { Font } from "../../src/core/fonts.js";
+import { amendFallbackToUnicode, Font } from "../../src/core/fonts.js";
+import {
+  IdentityToUnicodeMap,
+  ToUnicodeMap,
+} from "../../src/core/to_unicode_map.js";
 import { IdentityCMap } from "../../src/core/cmap.js";
-import { IdentityToUnicodeMap } from "../../src/core/to_unicode_map.js";
 
 describe("Font", () => {
   describe("charsToGlyphs", () => {
@@ -89,5 +92,35 @@ describe("Font", () => {
       // not be split into its two unpaired halves.
       expect(encodeString("😂C")).toEqual(["\x02C"]);
     });
+  });
+});
+
+describe("amendFallbackToUnicode", () => {
+  it("prefers the glyph name over a case-only ToUnicode, except for suffixed names", () => {
+    const properties = {
+      fallbackToUnicode: new Map([
+        [1, "S"],
+        [2, "h"],
+        [3, "S"],
+      ]),
+      toUnicode: new ToUnicodeMap(
+        new Map([
+          [1, "s"],
+          [2, "H"],
+          [3, "s"],
+        ])
+      ),
+      differences: new Map([
+        [2, "h.sc"],
+        [3, ".notdef"],
+      ]),
+      defaultEncoding: ["", "S", "", "S"],
+    };
+    amendFallbackToUnicode(properties);
+    expect(properties.toUnicode.get(1)).toEqual("S");
+    // Small caps typed as "H" keep their ToUnicode.
+    expect(properties.toUnicode.get(2)).toEqual("H");
+    // A '.notdef' difference falls back to the default encoding's name.
+    expect(properties.toUnicode.get(3)).toEqual("S");
   });
 });
