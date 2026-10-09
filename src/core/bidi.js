@@ -476,6 +476,10 @@ function reverseIfRtl(str, normalize, vertical) {
   if (vertical || !(isRtl(first) || hebrewForm)) {
     return str;
   }
+  // Only presentation forms (U+FB1D on) expand: a lone letter stays as is.
+  if (str.length === 1 && first < 0xfb1d) {
+    return str;
+  }
   if (normalize) {
     str = normalizeUnicode(str);
   }
