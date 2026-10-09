@@ -13,7 +13,7 @@
  * limitations under the License.
  */
 
-import { bidi } from "../../src/core/bidi.js";
+import { bidi, reverseIfRtl } from "../../src/core/bidi.js";
 import { fetchData } from "../../src/display/display_utils.js";
 import { isNodeJS } from "../../src/shared/util.js";
 
@@ -301,5 +301,45 @@ describe("bidi", function () {
 
     expect(total).toBeGreaterThan(0);
     expect(failingLines).toEqual([]);
+  });
+});
+
+describe("reverseIfRtl", function () {
+  const u = (...codes) => String.fromCharCode(...codes);
+  const alef = u(0x0627),
+    lam = u(0x0644),
+    lamAlef = u(0x0644, 0x0627);
+
+  it("keeps a multi-char RTL glyph in logical order through bidi", function () {
+    // Glyphs in visual order (left to right): alef, lam-alef, lam.
+    const str = [alef, lamAlef, lam].map(g => reverseIfRtl(g, false)).join("");
+    expect(bidi(str).str).toEqual(lam + lamAlef + alef);
+  });
+
+  it("expands an Arabic ligature form before reversing it", function () {
+    expect(reverseIfRtl(u(0xfc00), true)).toEqual(u(0x062c, 0x0626));
+    expect(reverseIfRtl(u(0xfc00), false)).toEqual(u(0xfc00));
+  });
+
+  it("expands a Hebrew presentation form before reversing it", function () {
+    // Alef-lamed ligature.
+    expect(reverseIfRtl(u(0xfb4f), true)).toEqual(u(0x05dc, 0x05d0));
+    expect(reverseIfRtl(u(0xfb4f), false)).toEqual(u(0xfb4f));
+  });
+
+  it("leaves LTR, single chars and Arabic-Indic digits alone", function () {
+    expect(reverseIfRtl("fi", true)).toEqual("fi");
+    expect(reverseIfRtl(lam, true)).toEqual(lam);
+    expect(reverseIfRtl("", true)).toEqual("");
+    // AN, which bidi() does not reverse.
+    expect(reverseIfRtl(u(0x0661, 0x0662), true)).toEqual(u(0x0661, 0x0662));
+  });
+
+  it("leaves glyphs mixing in non-R/AL chars, and vertical text, alone", function () {
+    const hehZwnj = u(0x0647, 0x200c),
+      lamFatha = u(0x0644, 0x064e);
+    expect(reverseIfRtl(hehZwnj, true)).toEqual(hehZwnj);
+    expect(reverseIfRtl(lamFatha, true)).toEqual(lamFatha);
+    expect(reverseIfRtl(lamAlef, true, /* vertical = */ true)).toEqual(lamAlef);
   });
 });
