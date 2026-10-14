@@ -133,6 +133,22 @@ function isDefaultDecodeHelper(decode, expectedLen) {
   return false;
 }
 
+function sRGBTransferFunction(color) {
+  // See http://en.wikipedia.org/wiki/SRGB.
+  if (color <= 0.0031308) {
+    return MathClamp(12.92 * color, 0, 1);
+  }
+  // Optimization:
+  // If color is close enough to 1, skip calling the following transform
+  // since calling Math.pow is expensive. If color is larger than
+  // the threshold, the final result is larger than 254.5 since
+  // ((1 + 0.055) * 0.99554525 ** (1 / 2.4) - 0.055) * 255 ===
+  // 254.50000003134699
+  return color >= 0.99554525
+    ? 1
+    : MathClamp((1 + 0.055) * color ** (1 / 2.4) - 0.055, 0, 1);
+}
+
 class ColorSpace {
   static #rgbBuf = new Uint8ClampedArray(3);
 
@@ -823,9 +839,8 @@ class CalGrayCS extends ColorSpace {
     // Computes L as per spec. ( = this.YW * AG )
     // Except if other than default BlackPoint values are used.
     const L = this.YW * AG;
-    // http://www.poynton.com/notes/colour_and_gamma/ColorFAQ.html, Ch 4.
-    // Convert values to rgb range [0, 255].
-    const val = Math.max(295.8 * L ** 0.3333333333333333 - 40.8, 0);
+    // A neutral luminance, encoded as sRGB gray (as MuPDF does).
+    const val = sRGBTransferFunction(L) * 255;
     dest[destOffset] = val;
     dest[destOffset + 1] = val;
     dest[destOffset + 2] = val;
@@ -966,22 +981,6 @@ class CalRGBCS extends ColorSpace {
     result[2] = (LMS[2] * D65Z) / sourceWhitePoint[2];
   }
 
-  #sRGBTransferFunction(color) {
-    // See http://en.wikipedia.org/wiki/SRGB.
-    if (color <= 0.0031308) {
-      return MathClamp(12.92 * color, 0, 1);
-    }
-    // Optimization:
-    // If color is close enough to 1, skip calling the following transform
-    // since calling Math.pow is expensive. If color is larger than
-    // the threshold, the final result is larger than 254.5 since
-    // ((1 + 0.055) * 0.99554525 ** (1 / 2.4) - 0.055) * 255 ===
-    // 254.50000003134699
-    return color >= 0.99554525
-      ? 1
-      : MathClamp((1 + 0.055) * color ** (1 / 2.4) - 0.055, 0, 1);
-  }
-
   #decodeL(L) {
     if (L < 0) {
       return -this.#decodeL(-L);
@@ -1114,9 +1113,9 @@ class CalRGBCS extends ColorSpace {
     this.#matrixProduct(CalRGBCS.#SRGB_D65_XYZ_TO_RGB_MATRIX, XYZ_D65, SRGB);
 
     // Convert the values to rgb range [0, 255].
-    dest[destOffset] = this.#sRGBTransferFunction(SRGB[0]) * 255;
-    dest[destOffset + 1] = this.#sRGBTransferFunction(SRGB[1]) * 255;
-    dest[destOffset + 2] = this.#sRGBTransferFunction(SRGB[2]) * 255;
+    dest[destOffset] = sRGBTransferFunction(SRGB[0]) * 255;
+    dest[destOffset + 1] = sRGBTransferFunction(SRGB[1]) * 255;
+    dest[destOffset + 2] = sRGBTransferFunction(SRGB[2]) * 255;
   }
 
   getRgbItem(src, srcOffset, dest, destOffset) {
