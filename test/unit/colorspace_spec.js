@@ -598,22 +598,22 @@ describe("colorspace", function () {
       const testDest = new Uint8ClampedArray(4 * 4 * 3);
       // prettier-ignore
       const expectedDest = new Uint8ClampedArray([
-        25, 25, 25,
-        25, 25, 25,
-        143, 143, 143,
-        143, 143, 143,
-        25, 25, 25,
-        25, 25, 25,
-        143, 143, 143,
-        143, 143, 143,
+        27, 27, 27,
+        27, 27, 27,
+        134, 134, 134,
+        134, 134, 134,
+        27, 27, 27,
+        27, 27, 27,
+        134, 134, 134,
+        134, 134, 134,
         251, 251, 251,
         251, 251, 251,
-        149, 149, 149,
-        149, 149, 149,
+        140, 140, 140,
+        140, 140, 140,
         251, 251, 251,
         251, 251, 251,
-        149, 149, 149,
-        149, 149, 149
+        140, 140, 140,
+        140, 140, 140
       ]);
       colorSpace.fillRgb(testDest, 2, 2, 4, 4, 4, 8, testSrc, 0);
 
@@ -622,6 +622,29 @@ describe("colorspace", function () {
       );
       expect(colorSpace.isPassthrough(8)).toBeFalse();
       expect(testDest).toEqual(expectedDest);
+    });
+
+    it("should encode the luminance as sRGB gray", function () {
+      const params = new Dict();
+      params.set("WhitePoint", [1, 1, 1]);
+      params.set("Gamma", 1.0);
+
+      const colorSpace = ColorSpaceUtils.parse({
+        cs: [Name.get("CalGray"), params],
+        xref: new XRefMock([]),
+        resources: new Dict(),
+        pdfFunctionFactory: new PDFFunctionFactory({ xref: new XRefMock([]) }),
+        globalColorSpaceCache,
+        localColorSpaceCache: new LocalColorSpaceCache(),
+      });
+
+      // sRGB curve, and its linear segment near black.
+      expect(colorSpace.getRgb(new Float32Array([0.5]), 0)).toEqual(
+        new Uint8ClampedArray([188, 188, 188])
+      );
+      expect(colorSpace.getRgb(new Float32Array([0.001]), 0)).toEqual(
+        new Uint8ClampedArray([3, 3, 3])
+      );
     });
   });
 
