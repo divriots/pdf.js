@@ -552,6 +552,36 @@ describe("evaluator", function () {
     });
   });
 
+  describe("form XObject", function () {
+    it("should start the form content from the ctm times its Matrix", async function () {
+      const form = new StringStream("");
+      form.dict = new Dict();
+      form.dict.set("Subtype", Name.get("Form"));
+      form.dict.set("BBox", [0, 0, 10, 10]);
+      form.dict.set("Matrix", [1, 0, 0, 1, -5, -7]);
+      const xobjects = new Dict();
+      xobjects.set("Fm", form);
+      const resources = new ResourcesMock();
+      resources.XObject = xobjects;
+
+      const ctms = [];
+      const getOperatorList = partialEvaluator.getOperatorList;
+      spyOn(partialEvaluator, "getOperatorList").and.callFake(
+        function (params) {
+          ctms.push(Array.from(params.initialState?.ctm ?? []));
+          return getOperatorList.call(this, params);
+        }
+      );
+      await runOperatorListCheck(
+        partialEvaluator,
+        new StringStream("2 0 0 2 10 20 cm /Fm Do"),
+        resources
+      );
+
+      expect(ctms[1]).toEqual([2, 0, 0, 2, 0, 6]);
+    });
+  });
+
   describe("simple font toUnicode", function () {
     it("should map suffixed and ligature glyph names", function () {
       const toUnicode = partialEvaluator._simpleFontToUnicode({

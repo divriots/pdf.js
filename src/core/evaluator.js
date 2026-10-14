@@ -508,6 +508,11 @@ class PartialEvaluator {
     // apply the bounding box to it.
     const f32matrix = matrix && new Float32Array(matrix);
     const args = [f32matrix, (!group && f32bbox) || null];
+    // The form's content is drawn in its Matrix: TextContentItem transforms
+    // are built from this ctm (getTextContent applies it the same way).
+    if (matrix) {
+      initialState.ctm = Util.transform(initialState.ctm, matrix);
+    }
     const localResources = dict.get("Resources");
 
     if (group) {
