@@ -2221,7 +2221,7 @@ class PDFWorker {
 
       const worker = new Worker(workerSrc, { type: "module" });
       const messageHandler = new MessageHandler("main", "worker", worker);
-      const terminateEarly = () => {
+      const terminateEarly = workerError => {
         ac.abort();
         messageHandler.destroy();
         worker.terminate();
@@ -2230,18 +2230,21 @@ class PDFWorker {
         } else {
           // Fall back to fake worker if the termination is caused by an
           // error (e.g. NetworkError / SecurityError).
-          this.#setupFakeWorker();
+          this.#setupFakeWorker(workerError);
         }
       };
 
       const ac = new AbortController();
       worker.addEventListener(
         "error",
-        () => {
+        event => {
           if (!this.#webWorker) {
             // Worker failed to initialize due to an error. Clean up and fall
             // back to the fake worker.
-            terminateEarly();
+            // divRIOTS: keep what the event says (a module that fails to
+            // load fires a bare Event: its type alone).
+            const { type, message, filename, lineno } = event;
+            terminateEarly({ type, message, filename, lineno });
           }
         },
         { signal: ac.signal }
@@ -2250,7 +2253,7 @@ class PDFWorker {
       messageHandler.on("ready", data => {
         ac.abort();
         if (this.destroyed || !(data instanceof Uint8Array)) {
-          terminateEarly();
+          terminateEarly({ type: "ready", message: typeof data });
           return;
         }
         this.#messageHandler = messageHandler;
@@ -2259,13 +2262,17 @@ class PDFWorker {
 
         this.#resolve();
       });
-    } catch {
+    } catch (ex) {
       info("The worker has been disabled.");
-      this.#setupFakeWorker();
+      this.#setupFakeWorker({ type: "throws", message: ex?.message });
     }
   }
 
-  #setupFakeWorker() {
+  /**
+   * @param {Object} [workerError] - divRIOTS: why the Web Worker did not
+   *   start, the `cause` of a fake worker that fails too.
+   */
+  #setupFakeWorker(workerError) {
     if (!PDFWorker.#isWorkerDisabled) {
       warn("Setting up fake worker.");
       PDFWorker.#isWorkerDisabled = true;
@@ -2293,7 +2300,9 @@ class PDFWorker {
       })
       .catch(reason => {
         this.#capability.reject(
-          new Error(`Setting up fake worker failed: "${reason.message}".`)
+          new Error(`Setting up fake worker failed: "${reason.message}".`, {
+            cause: workerError,
+          })
         );
       });
   }
@@ -2363,7 +2372,11 @@ class PDFWorker {
         typeof PDFJSDev === "undefined"
           ? await import("pdfjs/pdf.worker.js")
           : await __raw_import__(this.workerSrc);
-      return worker.WorkerMessageHandler;
+      // divRIOTS: a worker bundled as a classic script (Vite's default worker
+      // format, IIFE) exports nothing; running it set `globalThis.pdfjsWorker`.
+      return (
+        worker.WorkerMessageHandler || this.#mainThreadWorkerMessageHandler
+      );
     };
 
     return shadow(this, "_setupFakeWorkerGlobal", loader());
